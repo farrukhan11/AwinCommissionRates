@@ -1,36 +1,60 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Awin Merchant Sync
 
-## Getting Started
+Phase 1 setup for synchronizing Awin merchant programme details into MongoDB.
 
-First, run the development server:
+## Setup
+
+1. Copy the environment template:
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+cp .env.example .env.local
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+2. Fill in `.env.local` with your credentials:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+- `MONGODB_URI` — MongoDB connection string
+- `AWIN_API_TOKEN` — Awin API bearer token (server-side only)
+- `AWIN_PUBLISHER_ID` — defaults to `1951827`
+- `ADMIN_API_KEY` — protects the test API route
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+3. Install dependencies and start the dev server:
 
-## Learn More
+```bash
+npm install
+npm run dev
+```
 
-To learn more about Next.js, take a look at the following resources:
+The app runs at [http://localhost:3000](http://localhost:3000).
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Test the Awin sync endpoint
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Replace `YOUR_ADMIN_API_KEY` with the value from `.env.local`.
 
-## Deploy on Vercel
+### curl (macOS/Linux)
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+```bash
+curl -X POST http://localhost:3000/api/awin/test-program \
+  -H "Content-Type: application/json" \
+  -H "x-admin-api-key: YOUR_ADMIN_API_KEY" \
+  -d '{"advertiserId":55541}'
+```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+### PowerShell (Windows)
+
+```powershell
+Invoke-RestMethod `
+  -Method POST `
+  -Uri "http://localhost:3000/api/awin/test-program" `
+  -Headers @{"x-admin-api-key"="YOUR_ADMIN_API_KEY"} `
+  -ContentType "application/json" `
+  -Body '{"advertiserId":55541}'
+```
+
+## Phase 1 scope
+
+- Next.js App Router project with TypeScript and Tailwind CSS
+- MongoDB connection with Mongoose
+- Reusable Awin API client
+- Protected test route for a single advertiser sync
+
+Live testing requires valid `MONGODB_URI`, `AWIN_API_TOKEN`, and `ADMIN_API_KEY` values.
