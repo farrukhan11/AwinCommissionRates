@@ -72,17 +72,11 @@ function mapHttpStatusToError(
   }
 }
 
-export async function getAwinProgramDetails(
-  advertiserId: number,
-): Promise<unknown> {
-  if (!Number.isInteger(advertiserId) || advertiserId <= 0) {
-    throw new AwinApiError(
-      400,
-      "AWIN_REQUEST_FAILED",
-      "advertiserId must be a positive integer",
-    );
-  }
+function getPublisherId(): string {
+  return process.env.AWIN_PUBLISHER_ID ?? DEFAULT_PUBLISHER_ID;
+}
 
+function getApiToken(): string {
   const apiToken = process.env.AWIN_API_TOKEN;
 
   if (!apiToken) {
@@ -93,13 +87,21 @@ export async function getAwinProgramDetails(
     );
   }
 
-  const publisherId = process.env.AWIN_PUBLISHER_ID ?? DEFAULT_PUBLISHER_ID;
-  const url = new URL(
-    `${AWIN_BASE_URL}/publishers/${publisherId}/programmedetails`,
-  );
+  return apiToken;
+}
 
-  url.searchParams.set("advertiserId", String(advertiserId));
-  url.searchParams.set("relationship", "any");
+async function awinGet(
+  path: string,
+  queryParams?: Record<string, string>,
+): Promise<unknown> {
+  const apiToken = getApiToken();
+  const url = new URL(`${AWIN_BASE_URL}${path}`);
+
+  if (queryParams) {
+    for (const [key, value] of Object.entries(queryParams)) {
+      url.searchParams.set(key, value);
+    }
+  }
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
@@ -154,4 +156,43 @@ export async function getAwinProgramDetails(
   } finally {
     clearTimeout(timeoutId);
   }
+}
+
+export async function getAwinProgramDetails(
+  advertiserId: number,
+): Promise<unknown> {
+  if (!Number.isInteger(advertiserId) || advertiserId <= 0) {
+    throw new AwinApiError(
+      400,
+      "AWIN_REQUEST_FAILED",
+      "advertiserId must be a positive integer",
+    );
+  }
+
+  const publisherId = getPublisherId();
+
+  return awinGet(`/publishers/${publisherId}/programmedetails`, {
+    advertiserId: String(advertiserId),
+    relationship: "any",
+  });
+}
+
+export async function getAwinProgrammes(options?: {
+  includeHidden?: boolean;
+}): Promise<unknown> {
+  const includeHidden = options?.includeHidden ?? true;
+  const publisherId = getPublisherId();
+  const responseData = await awinGet(`/publishers/${publisherId}/programmes`, {
+    includeHidden: String(includeHidden),
+  });
+
+  if (!Array.isArray(responseData)) {
+    throw new AwinApiError(
+      502,
+      "AWIN_INVALID_RESPONSE",
+      "Awin API programmes response is not an array",
+    );
+  }
+
+  return responseData;
 }

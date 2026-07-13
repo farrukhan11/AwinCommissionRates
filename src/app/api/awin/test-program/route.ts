@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { isValidAdminApiKey } from "@/lib/auth/admin-api-key";
 import { getAwinProgramDetails } from "@/lib/awin/client";
 import { AwinApiError } from "@/lib/awin/errors";
 import { connectToDatabase } from "@/lib/mongodb";
@@ -28,14 +29,7 @@ function sanitizeErrorMessage(error: unknown): string {
 }
 
 export async function POST(request: NextRequest) {
-  const adminApiKey = request.headers.get("x-admin-api-key");
-  const expectedAdminApiKey = process.env.ADMIN_API_KEY;
-
-  if (
-    !expectedAdminApiKey ||
-    !adminApiKey ||
-    adminApiKey !== expectedAdminApiKey
-  ) {
+  if (!isValidAdminApiKey(request.headers.get("x-admin-api-key"))) {
     return NextResponse.json(
       {
         success: false,

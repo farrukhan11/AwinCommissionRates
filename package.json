@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test": "node --experimental-transform-types --test src/lib/awin/normalizers.test.ts"
   },
   "dependencies": {
     "mongoose": "^9.7.4",

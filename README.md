@@ -1,6 +1,6 @@
 # Awin Merchant Sync
 
-Phase 1 setup for synchronizing Awin merchant programme details into MongoDB.
+Phase 2 setup for importing the complete Awin programme directory into MongoDB.
 
 ## Setup
 
@@ -15,7 +15,7 @@ cp .env.example .env.local
 - `MONGODB_URI` — MongoDB connection string
 - `AWIN_API_TOKEN` — Awin API bearer token (server-side only)
 - `AWIN_PUBLISHER_ID` — defaults to `1951827`
-- `ADMIN_API_KEY` — protects the test API route
+- `ADMIN_API_KEY` — protects the API routes
 
 3. Install dependencies and start the dev server:
 
@@ -26,9 +26,57 @@ npm run dev
 
 The app runs at [http://localhost:3000](http://localhost:3000).
 
-## Test the Awin sync endpoint
+## Phase 2: Import the programme master list
+
+This imports the complete Awin programme directory for publisher `1951827`, including joined and not-joined programmes. It does **not** fetch individual `programmedetails` for every merchant yet.
+
+- Existing merchant detail data from Phase 1 is preserved
+- Running the import again updates existing merchants without creating duplicates
+- Merchants missing from a later import are marked `missing`, not deleted
 
 Replace `YOUR_ADMIN_API_KEY` with the value from `.env.local`.
+
+### Start the programme import
+
+#### curl (macOS/Linux)
+
+```bash
+curl -X POST http://localhost:3000/api/awin/import-programmes \
+  -H "Content-Type: application/json" \
+  -H "x-admin-api-key: YOUR_ADMIN_API_KEY" \
+  -d '{"includeHidden":true}'
+```
+
+#### PowerShell (Windows)
+
+```powershell
+Invoke-RestMethod `
+  -Method POST `
+  -Uri "http://localhost:3000/api/awin/import-programmes" `
+  -Headers @{"x-admin-api-key"="YOUR_ADMIN_API_KEY"} `
+  -ContentType "application/json" `
+  -Body '{"includeHidden":true}'
+```
+
+### Check import status
+
+#### curl (macOS/Linux)
+
+```bash
+curl http://localhost:3000/api/awin/import-programmes/status \
+  -H "x-admin-api-key: YOUR_ADMIN_API_KEY"
+```
+
+#### PowerShell (Windows)
+
+```powershell
+Invoke-RestMethod `
+  -Method GET `
+  -Uri "http://localhost:3000/api/awin/import-programmes/status" `
+  -Headers @{"x-admin-api-key"="YOUR_ADMIN_API_KEY"}
+```
+
+## Phase 1: Test a single advertiser detail sync
 
 ### curl (macOS/Linux)
 
@@ -50,11 +98,12 @@ Invoke-RestMethod `
   -Body '{"advertiserId":55541}'
 ```
 
-## Phase 1 scope
+## Validation
 
-- Next.js App Router project with TypeScript and Tailwind CSS
-- MongoDB connection with Mongoose
-- Reusable Awin API client
-- Protected test route for a single advertiser sync
+```bash
+npm run test
+npm run lint
+npm run build
+```
 
 Live testing requires valid `MONGODB_URI`, `AWIN_API_TOKEN`, and `ADMIN_API_KEY` values.

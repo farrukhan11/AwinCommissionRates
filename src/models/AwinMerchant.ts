@@ -1,6 +1,7 @@
 import mongoose, { Model, Schema } from "mongoose";
 
 export type SyncStatus = "pending" | "processing" | "completed" | "failed";
+export type DirectoryImportStatus = "discovered" | "active" | "missing";
 
 export interface IAwinMerchant {
   advertiserId: number;
@@ -14,6 +15,18 @@ export interface IAwinMerchant {
   syncStatus: SyncStatus;
   syncAttempts: number;
   lastSyncError?: string;
+  basicProgrammeInfo?: unknown;
+  programmeStatus?: string;
+  primaryRegion?: string;
+  countryCode?: string;
+  currencyCode?: string;
+  sector?: string;
+  displayUrl?: string;
+  logoUrl?: string;
+  isHidden?: boolean;
+  programmeListFetchedAt?: Date;
+  lastSeenInProgrammeListAt?: Date;
+  directoryImportStatus: DirectoryImportStatus;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -58,6 +71,44 @@ const AwinMerchantSchema = new Schema<IAwinMerchant>(
     },
     lastSyncError: {
       type: String,
+    },
+    basicProgrammeInfo: {
+      type: Schema.Types.Mixed,
+    },
+    programmeStatus: {
+      type: String,
+    },
+    primaryRegion: {
+      type: String,
+    },
+    countryCode: {
+      type: String,
+    },
+    currencyCode: {
+      type: String,
+    },
+    sector: {
+      type: String,
+    },
+    displayUrl: {
+      type: String,
+    },
+    logoUrl: {
+      type: String,
+    },
+    isHidden: {
+      type: Boolean,
+    },
+    programmeListFetchedAt: {
+      type: Date,
+    },
+    lastSeenInProgrammeListAt: {
+      type: Date,
+    },
+    directoryImportStatus: {
+      type: String,
+      enum: ["discovered", "active", "missing"],
+      default: "discovered",
     },
   },
   {
