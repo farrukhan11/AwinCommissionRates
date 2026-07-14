@@ -19,8 +19,30 @@ function errorMessage(data, status) {
   ) {
     return data.error.message;
   }
-
   return `Request failed (${status})`;
+}
+
+function fallbackCommission(merchant) {
+  if (merchant.commissionMin === undefined || merchant.commissionMin === null) {
+    return "—";
+  }
+
+  const min = merchant.commissionMin;
+  const max = merchant.commissionMax ?? min;
+  const type = String(merchant.commissionType ?? "").toLowerCase();
+
+  if (type.includes("percentage")) {
+    return min === max ? `${min}%` : `${min}% - ${max}%`;
+  }
+
+  const currency = merchant.currencyCode ? `${merchant.currencyCode} ` : "";
+  return min === max
+    ? `${currency}${min}`
+    : `${currency}${min} - ${currency}${max}`;
+}
+
+function commissionText(merchant) {
+  return merchant.commissionDisplay || fallbackCommission(merchant);
 }
 
 export default function DashboardClient() {
@@ -92,7 +114,6 @@ export default function DashboardClient() {
       const saved = sessionStorage.getItem("awin-admin-api-key");
       if (saved) setApiKey(saved);
     }, 0);
-
     return () => window.clearTimeout(timer);
   }, []);
 
@@ -105,13 +126,17 @@ export default function DashboardClient() {
   useEffect(() => {
     if (!authenticated) return;
     const timer = window.setInterval(() => void refresh(), 15_000);
-    return () => window.clearInterval(timer);
+    const onSyncUpdate = () => void refresh();
+    window.addEventListener("awin-detail-sync-updated", onSyncUpdate);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("awin-detail-sync-updated", onSyncUpdate);
+    };
   }, [authenticated, refresh]);
 
   async function runAction(label, action) {
     setBusy(true);
     setMessage("");
-
     try {
       await action();
       setMessage(`${label} successful`);
@@ -130,13 +155,11 @@ export default function DashboardClient() {
 
   async function exportCsv() {
     setBusy(true);
-
     try {
       const response = await fetch("/api/awin/export", {
         headers: { "x-admin-api-key": apiKey },
       });
       if (!response.ok) throw new Error("Export failed");
-
       const blob = await response.blob();
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
@@ -158,12 +181,8 @@ export default function DashboardClient() {
           onSubmit={login}
           className="w-full rounded-2xl border border-zinc-800 bg-zinc-950 p-7 shadow-2xl"
         >
-          <p className="text-sm font-medium text-emerald-400">
-            Awin Commission Rates
-          </p>
-          <h1 className="mt-2 text-3xl font-semibold text-white">
-            Admin dashboard
-          </h1>
+          <p className="text-sm font-medium text-emerald-400">Awin Commission Rates</p>
+          <h1 className="mt-2 text-3xl font-semibold text-white">Admin dashboard</h1>
           <p className="mt-3 text-sm text-zinc-400">
             Enter the ADMIN_API_KEY configured on the server.
           </p>
@@ -188,12 +207,8 @@ export default function DashboardClient() {
     <main className="mx-auto min-h-screen max-w-7xl px-5 py-8">
       <header className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <p className="text-sm font-medium text-emerald-500">
-            Awin Commission Rates
-          </p>
-          <h1 className="text-3xl font-semibold text-zinc-100">
-            Merchant synchronization
-          </h1>
+          <p className="text-sm font-medium text-emerald-500">Awin Commission Rates</p>
+          <h1 className="text-3xl font-semibold text-zinc-100">Merchant synchronization</h1>
         </div>
         <div className="flex flex-wrap gap-2">
           <button
@@ -238,11 +253,7 @@ export default function DashboardClient() {
           >
             Refresh stale
           </button>
-          <button
-            disabled={busy}
-            className="btn-secondary"
-            onClick={() => void exportCsv()}
-          >
+          <button disabled={busy} className="btn-secondary" onClick={() => void exportCsv()}>
             Export CSV
           </button>
         </div>
@@ -257,14 +268,8 @@ export default function DashboardClient() {
       <section className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Stat label="Directory merchants" value={directory?.merchants.total ?? 0} />
         <Stat label="Active programmes" value={directory?.merchants.active ?? 0} />
-        <Stat
-          label="Details completed"
-          value={directory?.merchants.completedDetails ?? 0}
-        />
-        <Stat
-          label="Detail failures"
-          value={directory?.merchants.failedDetails ?? 0}
-        />
+        <Stat label="Details completed" value={directory?.merchants.completedDetails ?? 0} />
+        <Stat label="Detail failures" value={directory?.merchants.failedDetails ?? 0} />
       </section>
 
       <section className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-950 p-6">
@@ -285,10 +290,7 @@ export default function DashboardClient() {
                     void runAction("Resume", () =>
                       api("/api/awin/detail-sync/control", {
                         method: "POST",
-                        body: JSON.stringify({
-                          action: "resume",
-                          runId: run.id,
-                        }),
+                        body: JSON.stringify({ action: "resume", runId: run.id }),
                       }),
                     )
                   }
@@ -338,9 +340,7 @@ export default function DashboardClient() {
               />
             </div>
             <div className="mt-3 grid gap-3 text-sm text-zinc-400 sm:grid-cols-3 lg:grid-cols-6">
-              <span>
-                {run.processedCount}/{run.totalQueued} processed
-              </span>
+              <span>{run.processedCount}/{run.totalQueued} processed</span>
               <span>{run.successCount} successful</span>
               <span>{run.failedCount} failed</span>
               <span>{run.retryCount} retries</span>
@@ -399,42 +399,43 @@ export default function DashboardClient() {
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-800">
-              {merchants.map((merchant) => (
-                <tr key={merchant.id} className="text-zinc-300">
-                  <td className="table-cell font-mono">
-                    {merchant.advertiserId}
-                  </td>
-                  <td className="table-cell">
-                    <div className="font-medium text-white">
-                      {merchant.programmeName ?? "Unnamed"}
-                    </div>
-                    {merchant.lastSyncError && (
-                      <div className="max-w-xs truncate text-xs text-red-400">
-                        {merchant.lastSyncError}
+              {merchants.map((merchant) => {
+                const commission = commissionText(merchant);
+                const unavailable = merchant.commissionFetchStatus === "unavailable";
+                return (
+                  <tr key={merchant.id} className="text-zinc-300">
+                    <td className="table-cell font-mono">{merchant.advertiserId}</td>
+                    <td className="table-cell">
+                      <div className="font-medium text-white">
+                        {merchant.programmeName ?? "Unnamed"}
                       </div>
-                    )}
-                  </td>
-                  <td className="table-cell">{merchant.countryCode ?? "—"}</td>
-                  <td className="table-cell">
-                    {merchant.membershipStatus ?? "—"}
-                  </td>
-                  <td className="table-cell">
-                    {merchant.commissionMin !== undefined
-                      ? `${merchant.commissionMin}–${merchant.commissionMax ?? merchant.commissionMin} ${merchant.commissionType ?? ""}`
-                      : "—"}
-                  </td>
-                  <td className="table-cell">
-                    <span className={`status status-${merchant.syncStatus}`}>
-                      {merchant.syncStatus}
-                    </span>
-                  </td>
-                  <td className="table-cell">
-                    {merchant.detailsFetchedAt
-                      ? new Date(merchant.detailsFetchedAt).toLocaleString()
-                      : "—"}
-                  </td>
-                </tr>
-              ))}
+                      {merchant.lastSyncError && (
+                        <div className="max-w-xs truncate text-xs text-red-400">
+                          {merchant.lastSyncError}
+                        </div>
+                      )}
+                    </td>
+                    <td className="table-cell">{merchant.countryCode ?? "—"}</td>
+                    <td className="table-cell">{merchant.membershipStatus ?? "—"}</td>
+                    <td
+                      className={`table-cell ${unavailable ? "text-amber-400" : "text-zinc-200"}`}
+                      title={merchant.commissionUnavailableReason || commission}
+                    >
+                      {commission}
+                    </td>
+                    <td className="table-cell">
+                      <span className={`status status-${merchant.syncStatus}`}>
+                        {merchant.syncStatus}
+                      </span>
+                    </td>
+                    <td className="table-cell">
+                      {merchant.detailsFetchedAt
+                        ? new Date(merchant.detailsFetchedAt).toLocaleString()
+                        : "—"}
+                    </td>
+                  </tr>
+                );
+              })}
               {merchants.length === 0 && (
                 <tr>
                   <td className="table-cell text-zinc-500" colSpan={7}>
@@ -447,9 +448,7 @@ export default function DashboardClient() {
         </div>
 
         <div className="flex items-center justify-between border-t border-zinc-800 p-4 text-sm text-zinc-400">
-          <span>
-            Page {page} of {pages}
-          </span>
+          <span>Page {page} of {pages}</span>
           <div className="flex gap-2">
             <button
               disabled={page <= 1}
@@ -476,9 +475,7 @@ function Stat({ label, value }) {
   return (
     <div className="rounded-2xl border border-zinc-800 bg-zinc-950 p-5">
       <p className="text-sm text-zinc-500">{label}</p>
-      <p className="mt-2 text-3xl font-semibold text-white">
-        {value.toLocaleString()}
-      </p>
+      <p className="mt-2 text-3xl font-semibold text-white">{value.toLocaleString()}</p>
     </div>
   );
 }
