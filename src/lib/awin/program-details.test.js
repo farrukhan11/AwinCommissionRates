@@ -62,7 +62,10 @@ describe("normalizeAwinProgramDetails", () => {
     assert.equal(result.commissionDisplay, "2% - 5% / 1% - 8%");
     assert.equal(result.commissionFetchStatus, "fetched");
     assert.equal(result.detailFetchVersion, AWIN_DETAIL_FETCH_VERSION);
-    assert.equal(result.detailFetchStrategy, "programmedetails-default");
+    assert.equal(
+      result.detailFetchStrategy,
+      "programmedetails-relationship-any",
+    );
   });
 
   it("marks a not-joined programme without a range as undisclosed", () => {
