@@ -1,13 +1,16 @@
 {
   "name": "commission-awin",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "node --experimental-transform-types --test src/lib/awin/normalizers.test.ts"
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-transform-types --test src/lib/awin/normalizers.test.ts src/lib/awin/program-details.test.ts",
+    "worker": "node --env-file=.env.local scripts/awin-detail-worker.mjs",
+    "scheduler": "node --env-file=.env.local scripts/awin-scheduler.mjs"
   },
   "dependencies": {
     "mongoose": "^9.7.4",
