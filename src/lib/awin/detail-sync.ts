@@ -120,6 +120,8 @@ export async function startDetailSyncRun(
 ): Promise<HydratedDocument<IAwinDetailSyncRun>> {
   let run: HydratedDocument<IAwinDetailSyncRun>;
 
+  await AwinDetailSyncRun.init();
+
   try {
     run = await AwinDetailSyncRun.create({
       mode: input.mode,
