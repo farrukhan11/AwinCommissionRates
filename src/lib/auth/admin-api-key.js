@@ -1,6 +1,6 @@
-import { timingSafeEqual } from "crypto";
+import { timingSafeEqual } from "node:crypto";
 
-export function isValidAdminApiKey(providedKey: string | null): boolean {
+export function isValidAdminApiKey(providedKey) {
   const expectedKey = process.env.ADMIN_API_KEY;
 
   if (!expectedKey || !providedKey) {

@@ -24,16 +24,25 @@ export default function Home() {
           </a>
         </div>
         <div className="mt-10 grid gap-4 sm:grid-cols-3">
-          <Feature title="Phase 1–2" text="API client, MongoDB models, full programme directory import." />
-          <Feature title="Phase 3" text="Resumable rate-limited background detail worker with retries." />
-          <Feature title="Phase 4–5" text="Dashboard, controls, CSV export, PM2, scheduler, and CI." />
+          <Feature
+            title="Phase 1–2"
+            text="API client, MongoDB models, full programme directory import."
+          />
+          <Feature
+            title="Phase 3"
+            text="Resumable rate-limited background detail worker with retries."
+          />
+          <Feature
+            title="Phase 4–5"
+            text="Dashboard, controls, CSV export, PM2, scheduler, and CI."
+          />
         </div>
       </div>
     </main>
   );
 }
 
-function Feature({ title, text }: { title: string; text: string }) {
+function Feature({ title, text }) {
   return (
     <div className="rounded-2xl border border-zinc-800 bg-zinc-900/70 p-5">
       <h2 className="font-semibold text-white">{title}</h2>

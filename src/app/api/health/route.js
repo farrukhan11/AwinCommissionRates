@@ -16,7 +16,12 @@ export async function GET() {
       .lean();
 
     const heartbeatAgeSeconds = activeRun?.lastHeartbeatAt
-      ? Math.max(0, Math.floor((Date.now() - activeRun.lastHeartbeatAt.getTime()) / 1000))
+      ? Math.max(
+          0,
+          Math.floor(
+            (Date.now() - activeRun.lastHeartbeatAt.getTime()) / 1000,
+          ),
+        )
       : null;
 
     return NextResponse.json({

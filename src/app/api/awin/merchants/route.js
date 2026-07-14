@@ -1,47 +1,27 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 
 import { isValidAdminApiKey } from "@/lib/auth/admin-api-key";
 import { connectToDatabase } from "@/lib/mongodb";
-import AwinMerchant, {
-  type DirectoryImportStatus,
-  type SyncStatus,
-} from "@/models/AwinMerchant";
+import AwinMerchant from "@/models/AwinMerchant";
 
 export const runtime = "nodejs";
 
-type MerchantFilter = {
-  $or?: Array<Record<string, unknown>>;
-  syncStatus?: SyncStatus;
-  directoryImportStatus?: DirectoryImportStatus;
-  countryCode?: string;
-  membershipStatus?: string;
-};
+const SYNC_STATUSES = ["pending", "processing", "completed", "failed"];
+const DIRECTORY_STATUSES = ["discovered", "active", "missing"];
 
-const SYNC_STATUSES: SyncStatus[] = [
-  "pending",
-  "processing",
-  "completed",
-  "failed",
-];
-const DIRECTORY_STATUSES: DirectoryImportStatus[] = [
-  "discovered",
-  "active",
-  "missing",
-];
-
-function isSyncStatus(value: string | null): value is SyncStatus {
-  return SYNC_STATUSES.includes(value as SyncStatus);
+function isSyncStatus(value) {
+  return SYNC_STATUSES.includes(value);
 }
 
-function isDirectoryStatus(value: string | null): value is DirectoryImportStatus {
-  return DIRECTORY_STATUSES.includes(value as DirectoryImportStatus);
+function isDirectoryStatus(value) {
+  return DIRECTORY_STATUSES.includes(value);
 }
 
-function escapeRegex(value: string) {
+function escapeRegex(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-export async function GET(request: NextRequest) {
+export async function GET(request) {
   if (!isValidAdminApiKey(request.headers.get("x-admin-api-key"))) {
     return NextResponse.json(
       {
@@ -69,7 +49,7 @@ export async function GET(request: NextRequest) {
     const countryCode = params.get("countryCode")?.trim().toUpperCase();
     const membershipStatus = params.get("membershipStatus")?.trim();
 
-    const filter: MerchantFilter = {};
+    const filter = {};
     if (search) {
       const numericId = Number(search);
       filter.$or = [

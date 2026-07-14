@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { normalizeAwinProgramDetails } from "./program-details.ts";
+import { normalizeAwinProgramDetails } from "./program-details.js";
 
 describe("normalizeAwinProgramDetails", () => {
   it("preserves raw data and extracts programme information", () => {
