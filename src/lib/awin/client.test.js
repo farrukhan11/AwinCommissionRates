@@ -18,7 +18,7 @@ afterEach(() => {
 });
 
 describe("getAwinProgramDetails", () => {
-  it("lets Awin resolve the relationship by omitting the relationship query parameter", async () => {
+  it("uses relationship=any so joined and not-joined programmes can be resolved", async () => {
     process.env.AWIN_API_TOKEN = "test-token";
     process.env.AWIN_PUBLISHER_ID = "1952827";
 
@@ -37,16 +37,35 @@ describe("getAwinProgramDetails", () => {
       );
     };
 
-    const result = await getAwinProgramDetails(64110, {
-      relationship: "joined",
-    });
+    const result = await getAwinProgramDetails(64110);
 
     assert.equal(requestedUrl.pathname, "/publishers/1952827/programmedetails");
     assert.equal(requestedUrl.searchParams.get("advertiserId"), "64110");
-    assert.equal(requestedUrl.searchParams.has("relationship"), false);
+    assert.equal(requestedUrl.searchParams.get("relationship"), "any");
     assert.deepEqual(result.commissionRange, [
       { min: 0, max: 8, type: "percentage" },
     ]);
+  });
+
+  it("accepts a not-joined programme response with an empty commission range", async () => {
+    process.env.AWIN_API_TOKEN = "test-token";
+    process.env.AWIN_PUBLISHER_ID = "1952827";
+
+    globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          programmeInfo: { id: 94973, membershipStatus: "Not joined" },
+          commissionRange: [],
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        },
+      );
+
+    const result = await getAwinProgramDetails(94973);
+    assert.equal(result.programmeInfo.membershipStatus, "Not joined");
+    assert.deepEqual(result.commissionRange, []);
   });
 
   it("maps advertiser-level missing relationship responses to a terminal merchant miss", async () => {
