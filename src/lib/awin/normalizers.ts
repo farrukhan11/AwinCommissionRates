@@ -18,14 +18,8 @@ export interface NormalizedAwinProgramme {
 }
 
 export type NormalizeAwinProgrammeResult =
-  | {
-      valid: true;
-      programme: NormalizedAwinProgramme;
-    }
-  | {
-      valid: false;
-      reason: string;
-    };
+  | { valid: true; programme: NormalizedAwinProgramme }
+  | { valid: false; reason: string };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -36,77 +30,48 @@ function toPositiveInteger(value: unknown): number | undefined {
     return value;
   }
 
-  if (typeof value === "string" && value.trim() !== "") {
-    const parsed = Number.parseInt(value, 10);
-
-    if (Number.isInteger(parsed) && parsed > 0) {
-      return parsed;
-    }
+  if (typeof value === "string" && /^\d+$/.test(value.trim())) {
+    const parsed = Number(value.trim());
+    if (Number.isSafeInteger(parsed) && parsed > 0) return parsed;
   }
 
   return undefined;
 }
 
 function readString(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim() !== "" ? value : undefined;
+  return typeof value === "string" && value.trim() !== "" ? value.trim() : undefined;
 }
 
 function readBoolean(value: unknown): boolean | undefined {
   return typeof value === "boolean" ? value : undefined;
 }
 
-function getFirstValue(
-  record: Record<string, unknown>,
-  keys: string[],
-): unknown {
+function getFirstValue(record: Record<string, unknown>, keys: string[]): unknown {
   for (const key of keys) {
     const value = record[key];
-
-    if (value !== undefined && value !== null) {
-      return value;
-    }
+    if (value !== undefined && value !== null) return value;
   }
-
   return undefined;
 }
 
-function extractAdvertiserId(
-  record: Record<string, unknown>,
-): number | undefined {
+function extractAdvertiserId(record: Record<string, unknown>): number | undefined {
   const directId = toPositiveInteger(getFirstValue(record, ["id", "advertiserId"]));
+  if (directId !== undefined) return directId;
 
-  if (directId !== undefined) {
-    return directId;
-  }
-
-  const nestedAdvertiser = getFirstValue(record, ["advertiser"]);
-
-  if (isRecord(nestedAdvertiser)) {
-    return toPositiveInteger(
-      getFirstValue(nestedAdvertiser, ["id", "advertiserId"]),
-    );
-  }
-
-  return undefined;
+  const nestedAdvertiser = record.advertiser;
+  return isRecord(nestedAdvertiser)
+    ? toPositiveInteger(getFirstValue(nestedAdvertiser, ["id", "advertiserId"]))
+    : undefined;
 }
 
-export function normalizeAwinProgramme(
-  rawProgramme: unknown,
-): NormalizeAwinProgrammeResult {
+export function normalizeAwinProgramme(rawProgramme: unknown): NormalizeAwinProgrammeResult {
   if (!isRecord(rawProgramme)) {
-    return {
-      valid: false,
-      reason: "Programme record is not an object",
-    };
+    return { valid: false, reason: "Programme record is not an object" };
   }
 
   const advertiserId = extractAdvertiserId(rawProgramme);
-
   if (advertiserId === undefined) {
-    return {
-      valid: false,
-      reason: "Missing or invalid advertiser ID",
-    };
+    return { valid: false, reason: "Missing or invalid advertiser ID" };
   }
 
   const programme: NormalizedAwinProgramme = {
@@ -114,93 +79,66 @@ export function normalizeAwinProgramme(
     basicProgrammeInfo: rawProgramme,
   };
 
-  const programmeName = readString(
-    getFirstValue(rawProgramme, ["name", "programmeName"]),
-  );
+  const stringMappings: Array<[
+    keyof Pick<
+      NormalizedAwinProgramme,
+      | "programmeName"
+      | "membershipStatus"
+      | "programmeStatus"
+      | "currencyCode"
+      | "sector"
+      | "displayUrl"
+      | "logoUrl"
+    >,
+    unknown,
+  ]> = [
+    ["programmeName", getFirstValue(rawProgramme, ["name", "programmeName"])],
+    ["membershipStatus", getFirstValue(rawProgramme, ["membershipStatus", "relationship"])],
+    ["programmeStatus", getFirstValue(rawProgramme, ["status", "programmeStatus"])],
+    ["currencyCode", getFirstValue(rawProgramme, ["currencyCode", "currency"])],
+    ["sector", getFirstValue(rawProgramme, ["primarySector", "sector"])],
+    ["displayUrl", getFirstValue(rawProgramme, ["displayUrl", "url"])],
+    ["logoUrl", getFirstValue(rawProgramme, ["logoUrl", "logo"])],
+  ];
 
-  if (programmeName !== undefined) {
-    programme.programmeName = programmeName;
+  for (const [key, rawValue] of stringMappings) {
+    const value = readString(rawValue);
+    if (value !== undefined) programme[key] = value;
   }
 
-  const membershipStatus = readString(
-    getFirstValue(rawProgramme, ["membershipStatus", "relationship"]),
-  );
-
-  if (membershipStatus !== undefined) {
-    programme.membershipStatus = membershipStatus;
+  const primaryRegion = rawProgramme.primaryRegion;
+  if (isRecord(primaryRegion)) {
+    const regionName = readString(primaryRegion.name);
+    const countryCode = readString(primaryRegion.countryCode);
+    if (regionName) programme.primaryRegion = regionName;
+    if (countryCode) programme.countryCode = countryCode;
+  } else {
+    const regionName = readString(primaryRegion);
+    if (regionName) programme.primaryRegion = regionName;
   }
 
-  const programmeStatus = readString(
-    getFirstValue(rawProgramme, ["status", "programmeStatus"]),
-  );
-
-  if (programmeStatus !== undefined) {
-    programme.programmeStatus = programmeStatus;
+  if (!programme.countryCode) {
+    const countryCode = readString(getFirstValue(rawProgramme, ["countryCode", "country"]));
+    if (countryCode) programme.countryCode = countryCode;
   }
 
-  const primaryRegion = readString(rawProgramme.primaryRegion);
-
-  if (primaryRegion !== undefined) {
-    programme.primaryRegion = primaryRegion;
+  const explicitHidden = readBoolean(rawProgramme.isHidden);
+  if (explicitHidden !== undefined) {
+    programme.isHidden = explicitHidden;
+  } else if (programme.programmeStatus) {
+    programme.isHidden = programme.programmeStatus.toLowerCase() === "hidden";
   }
 
-  const countryCode = readString(
-    getFirstValue(rawProgramme, ["countryCode", "country"]),
-  );
-
-  if (countryCode !== undefined) {
-    programme.countryCode = countryCode;
-  }
-
-  const currencyCode = readString(
-    getFirstValue(rawProgramme, ["currencyCode", "currency"]),
-  );
-
-  if (currencyCode !== undefined) {
-    programme.currencyCode = currencyCode;
-  }
-
-  const sector = readString(rawProgramme.sector);
-
-  if (sector !== undefined) {
-    programme.sector = sector;
-  }
-
-  const displayUrl = readString(
-    getFirstValue(rawProgramme, ["displayUrl", "url"]),
-  );
-
-  if (displayUrl !== undefined) {
-    programme.displayUrl = displayUrl;
-  }
-
-  const logoUrl = readString(getFirstValue(rawProgramme, ["logoUrl", "logo"]));
-
-  if (logoUrl !== undefined) {
-    programme.logoUrl = logoUrl;
-  }
-
-  const isHidden = readBoolean(rawProgramme.isHidden);
-
-  if (isHidden !== undefined) {
-    programme.isHidden = isHidden;
-  }
-
-  return {
-    valid: true,
-    programme,
-  };
+  return { valid: true, programme };
 }
 
 export function deduplicateProgrammes(
   programmes: NormalizedAwinProgramme[],
 ): NormalizedAwinProgramme[] {
   const programmesByAdvertiserId = new Map<number, NormalizedAwinProgramme>();
-
   for (const programme of programmes) {
     programmesByAdvertiserId.set(programme.advertiserId, programme);
   }
-
   return Array.from(programmesByAdvertiserId.values());
 }
 
@@ -215,56 +153,35 @@ export function buildMerchantBulkOperation(
     directoryImportStatus: "active",
   };
 
-  if (programme.programmeName !== undefined) {
-    setFields.programmeName = programme.programmeName;
-  }
+  const optionalFields: Array<keyof NormalizedAwinProgramme> = [
+    "programmeName",
+    "membershipStatus",
+    "programmeStatus",
+    "primaryRegion",
+    "countryCode",
+    "currencyCode",
+    "sector",
+    "displayUrl",
+    "logoUrl",
+    "isHidden",
+  ];
 
-  if (programme.membershipStatus !== undefined) {
-    setFields.membershipStatus = programme.membershipStatus;
-  }
-
-  if (programme.programmeStatus !== undefined) {
-    setFields.programmeStatus = programme.programmeStatus;
-  }
-
-  if (programme.primaryRegion !== undefined) {
-    setFields.primaryRegion = programme.primaryRegion;
-  }
-
-  if (programme.countryCode !== undefined) {
-    setFields.countryCode = programme.countryCode;
-  }
-
-  if (programme.currencyCode !== undefined) {
-    setFields.currencyCode = programme.currencyCode;
-  }
-
-  if (programme.sector !== undefined) {
-    setFields.sector = programme.sector;
-  }
-
-  if (programme.displayUrl !== undefined) {
-    setFields.displayUrl = programme.displayUrl;
-  }
-
-  if (programme.logoUrl !== undefined) {
-    setFields.logoUrl = programme.logoUrl;
-  }
-
-  if (programme.isHidden !== undefined) {
-    setFields.isHidden = programme.isHidden;
+  for (const key of optionalFields) {
+    const value = programme[key];
+    if (value !== undefined) {
+      (setFields as Record<string, unknown>)[key] = value;
+    }
   }
 
   return {
     updateOne: {
-      filter: {
-        advertiserId: programme.advertiserId,
-      },
+      filter: { advertiserId: programme.advertiserId },
       update: {
         $set: setFields,
         $setOnInsert: {
           syncStatus: "pending" as const,
           syncAttempts: 0,
+          detailRunAttempts: 0,
         },
       },
       upsert: true,
