@@ -95,6 +95,7 @@ export async function POST(request: NextRequest) {
 
   try {
     await connectToDatabase();
+    await AwinSyncRun.init();
   } catch {
     return responseError(500, "DATABASE_ERROR", "Failed to connect to database");
   }
