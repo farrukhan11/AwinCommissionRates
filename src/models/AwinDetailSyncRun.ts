@@ -13,6 +13,7 @@ export type DetailSyncRunStatus =
 export interface IAwinDetailSyncRun {
   mode: DetailSyncMode;
   status: DetailSyncRunStatus;
+  activeLock?: string;
   totalQueued: number;
   processedCount: number;
   successCount: number;
@@ -56,6 +57,7 @@ const AwinDetailSyncRunSchema = new Schema<IAwinDetailSyncRun>(
       default: "pending",
       index: true,
     },
+    activeLock: String,
     totalQueued: { type: Number, default: 0 },
     processedCount: { type: Number, default: 0 },
     successCount: { type: Number, default: 0 },
@@ -78,6 +80,7 @@ const AwinDetailSyncRunSchema = new Schema<IAwinDetailSyncRun>(
   { timestamps: true },
 );
 
+AwinDetailSyncRunSchema.index({ activeLock: 1 }, { unique: true, sparse: true });
 AwinDetailSyncRunSchema.index({ status: 1, createdAt: 1 });
 AwinDetailSyncRunSchema.index({ leaseExpiresAt: 1 });
 
