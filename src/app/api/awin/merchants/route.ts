@@ -2,17 +2,40 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { isValidAdminApiKey } from "@/lib/auth/admin-api-key";
 import { connectToDatabase } from "@/lib/mongodb";
-import AwinMerchant from "@/models/AwinMerchant";
+import AwinMerchant, {
+  type DirectoryImportStatus,
+  type SyncStatus,
+} from "@/models/AwinMerchant";
 
 export const runtime = "nodejs";
 
 type MerchantFilter = {
   $or?: Array<Record<string, unknown>>;
-  syncStatus?: string | null;
-  directoryImportStatus?: string | null;
+  syncStatus?: SyncStatus;
+  directoryImportStatus?: DirectoryImportStatus;
   countryCode?: string;
   membershipStatus?: string;
 };
+
+const SYNC_STATUSES: SyncStatus[] = [
+  "pending",
+  "processing",
+  "completed",
+  "failed",
+];
+const DIRECTORY_STATUSES: DirectoryImportStatus[] = [
+  "discovered",
+  "active",
+  "missing",
+];
+
+function isSyncStatus(value: string | null): value is SyncStatus {
+  return SYNC_STATUSES.includes(value as SyncStatus);
+}
+
+function isDirectoryStatus(value: string | null): value is DirectoryImportStatus {
+  return DIRECTORY_STATUSES.includes(value as DirectoryImportStatus);
+}
 
 function escapeRegex(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -56,10 +79,8 @@ export async function GET(request: NextRequest) {
           : []),
       ];
     }
-    if (["pending", "processing", "completed", "failed"].includes(syncStatus ?? "")) {
-      filter.syncStatus = syncStatus;
-    }
-    if (["discovered", "active", "missing"].includes(directoryStatus ?? "")) {
+    if (isSyncStatus(syncStatus)) filter.syncStatus = syncStatus;
+    if (isDirectoryStatus(directoryStatus)) {
       filter.directoryImportStatus = directoryStatus;
     }
     if (countryCode) filter.countryCode = countryCode;
