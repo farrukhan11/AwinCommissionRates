@@ -27,17 +27,50 @@ jobs:
         run: npm test
 
       - name: Type check
-        run: npm run typecheck
+        id: typecheck
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run typecheck 2>&1 | tee typecheck.log
+
+      - name: Upload type-check log
+        if: failure() && steps.typecheck.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: typecheck-log
+          path: typecheck.log
 
       - name: Lint
-        run: npm run lint
+        id: lint
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run lint 2>&1 | tee lint.log
+
+      - name: Upload lint log
+        if: failure() && steps.lint.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: lint-log
+          path: lint.log
 
       - name: Check worker syntax
         run: node --check scripts/awin-detail-worker.mjs && node --check scripts/awin-scheduler.mjs
 
       - name: Build
-        run: npm run build
+        id: build
+        shell: bash
         env:
           MONGODB_URI: mongodb://127.0.0.1:27017/awin-build
           AWIN_API_TOKEN: build-placeholder
           ADMIN_API_KEY: build-placeholder
+        run: |
+          set -o pipefail
+          npm run build 2>&1 | tee build.log
+
+      - name: Upload build log
+        if: failure() && steps.build.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build.log
