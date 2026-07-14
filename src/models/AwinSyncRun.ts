@@ -1,7 +1,6 @@
 import mongoose, { Model, Schema } from "mongoose";
 
 export type AwinSyncRunType = "programme-directory-import";
-
 export type AwinSyncRunStatus =
   | "pending"
   | "running"
@@ -12,6 +11,7 @@ export type AwinSyncRunStatus =
 export interface IAwinSyncRun {
   type: AwinSyncRunType;
   status: AwinSyncRunStatus;
+  activeLock?: string;
   totalReceived: number;
   validProgrammes: number;
   invalidProgrammes: number;
@@ -37,64 +37,28 @@ const AwinSyncRunSchema = new Schema<IAwinSyncRun>(
     },
     status: {
       type: String,
-      enum: [
-        "pending",
-        "running",
-        "completed",
-        "completed_with_errors",
-        "failed",
-      ],
+      enum: ["pending", "running", "completed", "completed_with_errors", "failed"],
       required: true,
     },
-    totalReceived: {
-      type: Number,
-      default: 0,
-    },
-    validProgrammes: {
-      type: Number,
-      default: 0,
-    },
-    invalidProgrammes: {
-      type: Number,
-      default: 0,
-    },
-    insertedCount: {
-      type: Number,
-      default: 0,
-    },
-    updatedCount: {
-      type: Number,
-      default: 0,
-    },
-    matchedCount: {
-      type: Number,
-      default: 0,
-    },
-    modifiedCount: {
-      type: Number,
-      default: 0,
-    },
-    failedCount: {
-      type: Number,
-      default: 0,
-    },
-    startedAt: {
-      type: Date,
-    },
-    completedAt: {
-      type: Date,
-    },
-    errorCode: {
-      type: String,
-    },
-    errorMessage: {
-      type: String,
-    },
+    activeLock: String,
+    totalReceived: { type: Number, default: 0 },
+    validProgrammes: { type: Number, default: 0 },
+    invalidProgrammes: { type: Number, default: 0 },
+    insertedCount: { type: Number, default: 0 },
+    updatedCount: { type: Number, default: 0 },
+    matchedCount: { type: Number, default: 0 },
+    modifiedCount: { type: Number, default: 0 },
+    failedCount: { type: Number, default: 0 },
+    startedAt: Date,
+    completedAt: Date,
+    errorCode: String,
+    errorMessage: String,
   },
-  {
-    timestamps: true,
-  },
+  { timestamps: true },
 );
+
+AwinSyncRunSchema.index({ activeLock: 1 }, { unique: true, sparse: true });
+AwinSyncRunSchema.index({ type: 1, createdAt: -1 });
 
 const AwinSyncRun: Model<IAwinSyncRun> =
   (mongoose.models.AwinSyncRun as Model<IAwinSyncRun> | undefined) ??
