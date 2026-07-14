@@ -48,4 +48,32 @@ describe("getAwinProgramDetails", () => {
       { min: 0, max: 8, type: "percentage" },
     ]);
   });
+
+  it("maps advertiser-level missing relationship responses to a terminal merchant miss", async () => {
+    process.env.AWIN_API_TOKEN = "test-token";
+    process.env.AWIN_PUBLISHER_ID = "1952827";
+
+    globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          error: "missing.relationship",
+          description:
+            "No relationship exists between publisherId 1952827 and advertiserId 3",
+        }),
+        {
+          status: 403,
+          headers: { "Content-Type": "application/json" },
+        },
+      );
+
+    await assert.rejects(
+      () => getAwinProgramDetails(3),
+      (error) => {
+        assert.equal(error.status, 403);
+        assert.equal(error.code, "AWIN_NOT_FOUND");
+        assert.match(error.message, /No relationship exists/);
+        return true;
+      },
+    );
+  });
 });
