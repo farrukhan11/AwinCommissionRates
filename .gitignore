@@ -23,6 +23,7 @@
 # misc
 .DS_Store
 *.pem
+.awin-scheduler-state.json
 
 # debug
 npm-debug.log*

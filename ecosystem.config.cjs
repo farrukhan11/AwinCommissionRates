@@ -1,0 +1,40 @@
+module.exports = {
+  apps: [
+    {
+      name: "awin-web",
+      script: "npm",
+      args: "start",
+      cwd: __dirname,
+      instances: 1,
+      autorestart: true,
+      max_memory_restart: "750M",
+      env: {
+        NODE_ENV: "production",
+      },
+    },
+    {
+      name: "awin-detail-worker",
+      script: "scripts/awin-detail-worker.mjs",
+      cwd: __dirname,
+      interpreter: "node",
+      node_args: "--env-file=.env.local",
+      instances: 1,
+      autorestart: true,
+      restart_delay: 5000,
+      max_memory_restart: "500M",
+      time: true,
+    },
+    {
+      name: "awin-scheduler",
+      script: "scripts/awin-scheduler.mjs",
+      cwd: __dirname,
+      interpreter: "node",
+      node_args: "--env-file=.env.local",
+      instances: 1,
+      autorestart: true,
+      restart_delay: 10000,
+      max_memory_restart: "250M",
+      time: true,
+    },
+  ],
+};
