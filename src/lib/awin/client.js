@@ -25,31 +25,76 @@ function parseRetryAfter(headerValue) {
   return delaySeconds > 0 ? delaySeconds : undefined;
 }
 
-function mapHttpStatusToError(status, retryAfterSeconds) {
+function readAwinError(responseData) {
+  if (
+    typeof responseData !== "object" ||
+    responseData === null ||
+    Array.isArray(responseData)
+  ) {
+    return { code: undefined, description: undefined };
+  }
+
+  const code =
+    typeof responseData.error === "string"
+      ? responseData.error.trim()
+      : typeof responseData.code === "string"
+        ? responseData.code.trim()
+        : undefined;
+  const description =
+    typeof responseData.description === "string"
+      ? responseData.description.trim()
+      : typeof responseData.message === "string"
+        ? responseData.message.trim()
+        : undefined;
+
+  return {
+    code: code || undefined,
+    description: description || undefined,
+  };
+}
+
+function mapHttpStatusToError(status, retryAfterSeconds, responseData) {
+  const awinError = readAwinError(responseData);
+  const detailedMessage = [awinError.code, awinError.description]
+    .filter(Boolean)
+    .join(": ");
+
+  // Awin can return missing.relationship/403 for one advertiser even though the
+  // publisher token and account are valid. Treat that as a terminal merchant
+  // miss so one inaccessible programme cannot stop a 20k-programme sync.
+  if (awinError.code === "missing.relationship") {
+    return new AwinApiError(
+      status,
+      "AWIN_NOT_FOUND",
+      awinError.description || "No relationship exists for this advertiser",
+    );
+  }
+
   switch (status) {
     case 401:
       return new AwinApiError(
         401,
         "AWIN_UNAUTHORIZED",
-        "Awin API authentication failed",
+        detailedMessage || "Awin API authentication failed",
       );
     case 403:
       return new AwinApiError(
         403,
-        "AWIN_FORBIDDEN",
-        "Awin API access forbidden",
+        "AWIN_NOT_FOUND",
+        detailedMessage ||
+          "Awin advertiser programme is not accessible for this publisher",
       );
     case 404:
       return new AwinApiError(
         404,
         "AWIN_NOT_FOUND",
-        "Awin advertiser programme not found",
+        detailedMessage || "Awin advertiser programme not found",
       );
     case 429:
       return new AwinApiError(
         429,
         "AWIN_RATE_LIMITED",
-        "Awin API rate limit reached",
+        detailedMessage || "Awin API rate limit reached",
         retryAfterSeconds,
       );
     default:
@@ -57,14 +102,14 @@ function mapHttpStatusToError(status, retryAfterSeconds) {
         return new AwinApiError(
           status,
           "AWIN_SERVER_ERROR",
-          "Awin API server error",
+          detailedMessage || "Awin API server error",
         );
       }
 
       return new AwinApiError(
         status,
         "AWIN_REQUEST_FAILED",
-        "Awin API request failed",
+        detailedMessage || "Awin API request failed",
       );
   }
 }
@@ -129,7 +174,11 @@ async function awinGet(path, queryParams) {
         response.headers.get("Retry-After"),
       );
 
-      throw mapHttpStatusToError(response.status, retryAfterSeconds);
+      throw mapHttpStatusToError(
+        response.status,
+        retryAfterSeconds,
+        responseData,
+      );
     }
 
     return responseData;
