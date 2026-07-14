@@ -19,16 +19,10 @@ export const runtime = "nodejs";
 const BATCH_SIZE = 500;
 const STALE_IMPORT_THRESHOLD_MS = 30 * 60 * 1000;
 
-function unauthorizedResponse() {
+function responseError(status: number, code: string, message: string, extra?: object) {
   return NextResponse.json(
-    {
-      success: false,
-      error: {
-        code: "UNAUTHORIZED",
-        message: "Invalid or missing API key",
-      },
-    },
-    { status: 401 },
+    { success: false, error: { code, message, ...extra } },
+    { status },
   );
 }
 
@@ -36,66 +30,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function sanitizeErrorMessage(error: unknown): string {
-  if (error instanceof AwinApiError) {
-    return error.message;
-  }
-
-  if (error instanceof Error) {
-    return error.message;
-  }
-
-  return "An unexpected error occurred";
-}
-
-function getErrorCode(error: unknown): string {
-  if (error instanceof AwinApiError) {
-    return error.code;
-  }
-
-  if (error instanceof Error && error.message.includes("MongoDB")) {
-    return "DATABASE_ERROR";
-  }
-
-  return "IMPORT_FAILED";
-}
-
-async function resolveRunningImportConflict() {
-  const activeRun = await AwinSyncRun.findOne({
-    type: "programme-directory-import",
-    status: "running",
-  }).sort({ startedAt: -1 });
-
-  if (!activeRun) {
-    return null;
-  }
-
-  const referenceTime = activeRun.startedAt ?? activeRun.createdAt;
-  const isStale = Date.now() - referenceTime.getTime() > STALE_IMPORT_THRESHOLD_MS;
-
-  if (!isStale) {
-    return NextResponse.json(
-      {
-        success: false,
-        error: {
-          code: "AWIN_IMPORT_ALREADY_RUNNING",
-          message: "An Awin programme import is already running",
-        },
-      },
-      { status: 409 },
-    );
-  }
-
-  await AwinSyncRun.findByIdAndUpdate(activeRun._id, {
-    $set: {
-      status: "failed",
-      completedAt: new Date(),
-      errorCode: "AWIN_IMPORT_STALE",
-      errorMessage: "Import run exceeded the allowed running time",
-    },
-  });
-
-  return null;
+function isDuplicateKeyError(error: unknown) {
+  return isRecord(error) && error.code === 11000;
 }
 
 async function bulkUpsertProgrammes(
@@ -108,31 +44,21 @@ async function bulkUpsertProgrammes(
   let failedCount = 0;
 
   for (let index = 0; index < programmes.length; index += BATCH_SIZE) {
-    const batch = programmes.slice(index, index + BATCH_SIZE);
-    const operations = batch.map((programme) =>
-      buildMerchantBulkOperation(programme, importStartedAt),
-    );
+    const operations = programmes
+      .slice(index, index + BATCH_SIZE)
+      .map((programme) => buildMerchantBulkOperation(programme, importStartedAt));
 
     try {
-      const result = await AwinMerchant.bulkWrite(operations, {
-        ordered: false,
-      });
-
+      const result = await AwinMerchant.bulkWrite(operations, { ordered: false });
       insertedCount += result.upsertedCount;
       matchedCount += result.matchedCount;
       modifiedCount += result.modifiedCount;
     } catch (error) {
-      if (error instanceof MongoBulkWriteError) {
-        insertedCount += error.result.upsertedCount;
-        matchedCount += error.result.matchedCount;
-        modifiedCount += error.result.modifiedCount;
-        failedCount += Array.isArray(error.writeErrors)
-          ? error.writeErrors.length
-          : 1;
-        continue;
-      }
-
-      throw error;
+      if (!(error instanceof MongoBulkWriteError)) throw error;
+      insertedCount += error.result.upsertedCount;
+      matchedCount += error.result.matchedCount;
+      modifiedCount += error.result.modifiedCount;
+      failedCount += Array.isArray(error.writeErrors) ? error.writeErrors.length : 1;
     }
   }
 
@@ -147,66 +73,77 @@ async function bulkUpsertProgrammes(
 
 export async function POST(request: NextRequest) {
   if (!isValidAdminApiKey(request.headers.get("x-admin-api-key"))) {
-    return unauthorizedResponse();
+    return responseError(401, "UNAUTHORIZED", "Invalid or missing API key");
   }
 
   let includeHidden = true;
-
   try {
-    const bodyText = await request.text();
-
-    if (bodyText.trim() !== "") {
-      const body = JSON.parse(bodyText) as unknown;
-
-      if (isRecord(body) && body.includeHidden !== undefined) {
-        includeHidden = body.includeHidden !== false;
+    const text = await request.text();
+    if (text.trim()) {
+      const body = JSON.parse(text) as unknown;
+      if (!isRecord(body)) {
+        return responseError(400, "INVALID_REQUEST", "Request body must be an object");
       }
+      if (body.includeHidden !== undefined && typeof body.includeHidden !== "boolean") {
+        return responseError(400, "INVALID_REQUEST", "includeHidden must be a boolean");
+      }
+      includeHidden = body.includeHidden ?? true;
     }
   } catch {
-    return NextResponse.json(
-      {
-        success: false,
-        error: {
-          code: "INVALID_REQUEST",
-          message: "Invalid JSON body",
-        },
-      },
-      { status: 400 },
-    );
+    return responseError(400, "INVALID_REQUEST", "Invalid JSON body");
   }
 
   try {
     await connectToDatabase();
   } catch {
-    return NextResponse.json(
-      {
-        success: false,
-        error: {
-          code: "DATABASE_ERROR",
-          message: "Failed to connect to database",
-        },
-      },
-      { status: 500 },
-    );
+    return responseError(500, "DATABASE_ERROR", "Failed to connect to database");
   }
 
-  const runningImportResponse = await resolveRunningImportConflict();
+  const activeRun = await AwinSyncRun.findOne({ activeLock: "programme-directory" });
+  if (activeRun) {
+    const referenceTime = activeRun.startedAt ?? activeRun.createdAt;
+    if (Date.now() - referenceTime.getTime() <= STALE_IMPORT_THRESHOLD_MS) {
+      return responseError(
+        409,
+        "AWIN_IMPORT_ALREADY_RUNNING",
+        "An Awin programme import is already running",
+      );
+    }
 
-  if (runningImportResponse) {
-    return runningImportResponse;
+    await AwinSyncRun.findByIdAndUpdate(activeRun._id, {
+      $set: {
+        status: "failed",
+        completedAt: new Date(),
+        errorCode: "AWIN_IMPORT_STALE",
+        errorMessage: "Import run exceeded the allowed running time",
+      },
+      $unset: { activeLock: "" },
+    });
   }
 
   const importStartedAt = new Date();
-  const syncRun = await AwinSyncRun.create({
-    type: "programme-directory-import",
-    status: "running",
-    startedAt: importStartedAt,
-  });
+  let syncRun;
+  try {
+    syncRun = await AwinSyncRun.create({
+      type: "programme-directory-import",
+      status: "running",
+      activeLock: "programme-directory",
+      startedAt: importStartedAt,
+    });
+  } catch (error) {
+    if (isDuplicateKeyError(error)) {
+      return responseError(
+        409,
+        "AWIN_IMPORT_ALREADY_RUNNING",
+        "An Awin programme import is already running",
+      );
+    }
+    return responseError(500, "DATABASE_ERROR", "Failed to create import run");
+  }
 
   try {
-    const programmesResponse = await getAwinProgrammes({ includeHidden });
-
-    if (!Array.isArray(programmesResponse)) {
+    const response = await getAwinProgrammes({ includeHidden });
+    if (!Array.isArray(response)) {
       throw new AwinApiError(
         502,
         "AWIN_INVALID_RESPONSE",
@@ -214,43 +151,34 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const totalReceived = programmesResponse.length;
     const validProgrammes: NormalizedAwinProgramme[] = [];
     let invalidProgrammes = 0;
-
-    for (const rawProgramme of programmesResponse) {
+    for (const rawProgramme of response) {
       const normalized = normalizeAwinProgramme(rawProgramme);
-
-      if (normalized.valid) {
-        validProgrammes.push(normalized.programme);
-      } else {
-        invalidProgrammes += 1;
-      }
+      if (normalized.valid) validProgrammes.push(normalized.programme);
+      else invalidProgrammes += 1;
     }
 
     const uniqueProgrammes = deduplicateProgrammes(validProgrammes);
-    const bulkResult = await bulkUpsertProgrammes(
-      uniqueProgrammes,
-      importStartedAt,
-    );
+    const bulkResult = await bulkUpsertProgrammes(uniqueProgrammes, importStartedAt);
 
-    // Merchants not seen in this import are marked missing only after a
-    // successful Awin fetch and bulk upsert. Historical detail-sync data is
-    // preserved and records are never deleted.
-    const missingResult = await AwinMerchant.updateMany(
-      {
-        advertiserId: { $gt: 0 },
-        $or: [
-          { lastSeenInProgrammeListAt: { $lt: importStartedAt } },
-          { lastSeenInProgrammeListAt: { $exists: false } },
-        ],
-      },
-      {
-        $set: {
-          directoryImportStatus: "missing",
+    // Missing status is only applied after a fully successful bulk write. This
+    // prevents a programme that was present in Awin but failed to write locally
+    // from being incorrectly marked missing.
+    let missingMarkedCount = 0;
+    if (bulkResult.failedCount === 0) {
+      const missingResult = await AwinMerchant.updateMany(
+        {
+          advertiserId: { $gt: 0 },
+          $or: [
+            { lastSeenInProgrammeListAt: { $lt: importStartedAt } },
+            { lastSeenInProgrammeListAt: { $exists: false } },
+          ],
         },
-      },
-    );
+        { $set: { directoryImportStatus: "missing" } },
+      );
+      missingMarkedCount = missingResult.modifiedCount;
+    }
 
     const finalStatus =
       invalidProgrammes > 0 || bulkResult.failedCount > 0
@@ -260,7 +188,7 @@ export async function POST(request: NextRequest) {
     await AwinSyncRun.findByIdAndUpdate(syncRun._id, {
       $set: {
         status: finalStatus,
-        totalReceived,
+        totalReceived: response.length,
         validProgrammes: validProgrammes.length,
         invalidProgrammes,
         insertedCount: bulkResult.insertedCount,
@@ -270,74 +198,44 @@ export async function POST(request: NextRequest) {
         failedCount: bulkResult.failedCount,
         completedAt: new Date(),
       },
+      $unset: { activeLock: "" },
     });
 
     return NextResponse.json({
       success: true,
       runId: String(syncRun._id),
       summary: {
-        totalReceived,
+        totalReceived: response.length,
         validProgrammes: validProgrammes.length,
         invalidProgrammes,
         uniqueProgrammes: uniqueProgrammes.length,
         insertedCount: bulkResult.insertedCount,
         matchedCount: bulkResult.matchedCount,
         modifiedCount: bulkResult.modifiedCount,
-        missingMarkedCount: missingResult.modifiedCount,
+        failedCount: bulkResult.failedCount,
+        missingMarkedCount,
       },
     });
   } catch (error) {
-    const errorCode = getErrorCode(error);
-    const errorMessage = sanitizeErrorMessage(error);
-
+    const awinError = error instanceof AwinApiError ? error : null;
     await AwinSyncRun.findByIdAndUpdate(syncRun._id, {
       $set: {
         status: "failed",
         completedAt: new Date(),
-        errorCode,
-        errorMessage,
+        errorCode: awinError?.code ?? "IMPORT_FAILED",
+        errorMessage: awinError?.message ?? "Programme directory import failed",
       },
+      $unset: { activeLock: "" },
     });
 
-    if (error instanceof AwinApiError && error.code === "AWIN_RATE_LIMITED") {
-      return NextResponse.json(
-        {
-          success: false,
-          error: {
-            code: "AWIN_RATE_LIMITED",
-            message: "Awin API rate limit reached",
-            retryAfterSeconds: error.retryAfterSeconds ?? 60,
-          },
-        },
-        { status: 429 },
-      );
+    if (awinError) {
+      return responseError(awinError.status, awinError.code, awinError.message, {
+        ...(awinError.retryAfterSeconds !== undefined && {
+          retryAfterSeconds: awinError.retryAfterSeconds,
+        }),
+      });
     }
 
-    if (error instanceof AwinApiError) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: {
-            code: error.code,
-            message: error.message,
-            ...(error.retryAfterSeconds !== undefined && {
-              retryAfterSeconds: error.retryAfterSeconds,
-            }),
-          },
-        },
-        { status: error.status },
-      );
-    }
-
-    return NextResponse.json(
-      {
-        success: false,
-        error: {
-          code: errorCode,
-          message: errorMessage,
-        },
-      },
-      { status: 500 },
-    );
+    return responseError(500, "IMPORT_FAILED", "Programme directory import failed");
   }
 }
