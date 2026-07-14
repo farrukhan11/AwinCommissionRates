@@ -21,6 +21,34 @@ function escapeRegex(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+function membershipKey(value) {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_-]+/g, "");
+}
+
+function serializeMerchant(merchant) {
+  const notJoined = membershipKey(merchant.membershipStatus) === "notjoined";
+  const legacyUnavailable =
+    merchant.syncStatus === "completed" &&
+    notJoined &&
+    !merchant.commissionDisplay &&
+    merchant.commissionMin === undefined;
+
+  return {
+    ...merchant,
+    id: String(merchant._id),
+    _id: undefined,
+    ...(legacyUnavailable && {
+      commissionDisplay: "Not available (not joined)",
+      commissionFetchStatus: "unavailable",
+      commissionUnavailableReason:
+        "Awin does not expose commissionRange for a programme this publisher has not joined",
+    }),
+  };
+}
+
 export async function GET(request) {
   if (!isValidAdminApiKey(request.headers.get("x-admin-api-key"))) {
     return NextResponse.json(
@@ -86,11 +114,7 @@ export async function GET(request) {
         total,
         pages: Math.max(1, Math.ceil(total / limit)),
       },
-      merchants: merchants.map((merchant) => ({
-        ...merchant,
-        id: String(merchant._id),
-        _id: undefined,
-      })),
+      merchants: merchants.map(serializeMerchant),
     });
   } catch {
     return NextResponse.json(
