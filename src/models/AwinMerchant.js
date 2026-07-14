@@ -60,6 +60,13 @@ const AwinMerchantSchema = new Schema(
     commissionMin: Number,
     commissionMax: Number,
     commissionType: String,
+    commissionDisplay: String,
+    commissionFetchStatus: {
+      type: String,
+      enum: ["fetched", "unavailable", "failed"],
+      index: true,
+    },
+    commissionUnavailableReason: String,
   },
   {
     timestamps: true,

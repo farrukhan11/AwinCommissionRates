@@ -152,7 +152,7 @@ async function awinGet(path, queryParams) {
   }
 }
 
-export async function getAwinProgramDetails(advertiserId) {
+export async function getAwinProgramDetails(advertiserId, options = {}) {
   if (!Number.isInteger(advertiserId) || advertiserId <= 0) {
     throw new AwinApiError(
       400,
@@ -161,11 +161,12 @@ export async function getAwinProgramDetails(advertiserId) {
     );
   }
 
+  const relationship = options.relationship === "joined" ? "joined" : "any";
   const publisherId = getPublisherId();
 
   return awinGet(`/publishers/${publisherId}/programmedetails`, {
     advertiserId: String(advertiserId),
-    relationship: "any",
+    relationship,
   });
 }
 
