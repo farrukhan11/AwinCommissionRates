@@ -18,13 +18,13 @@ afterEach(() => {
 });
 
 describe("getAwinProgramDetails", () => {
-  it("uses relationship=any so joined and not-joined programmes can be resolved", async () => {
+  it("preserves joined commission ranges by omitting relationship on the first request", async () => {
     process.env.AWIN_API_TOKEN = "test-token";
     process.env.AWIN_PUBLISHER_ID = "1952827";
 
-    let requestedUrl;
+    const requestedUrls = [];
     globalThis.fetch = async (url) => {
-      requestedUrl = new URL(String(url));
+      requestedUrls.push(new URL(String(url)));
       return new Response(
         JSON.stringify({
           programmeInfo: { id: 64110, membershipStatus: "Joined" },
@@ -37,22 +37,44 @@ describe("getAwinProgramDetails", () => {
       );
     };
 
-    const result = await getAwinProgramDetails(64110);
+    const result = await getAwinProgramDetails(64110, { fallbackDelayMs: 0 });
 
-    assert.equal(requestedUrl.pathname, "/publishers/1952827/programmedetails");
-    assert.equal(requestedUrl.searchParams.get("advertiserId"), "64110");
-    assert.equal(requestedUrl.searchParams.get("relationship"), "any");
+    assert.equal(requestedUrls.length, 1);
+    assert.equal(
+      requestedUrls[0].pathname,
+      "/publishers/1952827/programmedetails",
+    );
+    assert.equal(requestedUrls[0].searchParams.get("advertiserId"), "64110");
+    assert.equal(requestedUrls[0].searchParams.has("relationship"), false);
     assert.deepEqual(result.commissionRange, [
       { min: 0, max: 8, type: "percentage" },
     ]);
   });
 
-  it("accepts a not-joined programme response with an empty commission range", async () => {
+  it("falls back to relationship=any only after missing.relationship", async () => {
     process.env.AWIN_API_TOKEN = "test-token";
     process.env.AWIN_PUBLISHER_ID = "1952827";
 
-    globalThis.fetch = async () =>
-      new Response(
+    const requestedUrls = [];
+    globalThis.fetch = async (url) => {
+      const requestedUrl = new URL(String(url));
+      requestedUrls.push(requestedUrl);
+
+      if (!requestedUrl.searchParams.has("relationship")) {
+        return new Response(
+          JSON.stringify({
+            error: "missing.relationship",
+            description:
+              "No relationship exists between publisherId 1952827 and advertiserId 94973",
+          }),
+          {
+            status: 403,
+            headers: { "Content-Type": "application/json" },
+          },
+        );
+      }
+
+      return new Response(
         JSON.stringify({
           programmeInfo: { id: 94973, membershipStatus: "Not joined" },
           commissionRange: [],
@@ -62,37 +84,44 @@ describe("getAwinProgramDetails", () => {
           headers: { "Content-Type": "application/json" },
         },
       );
+    };
 
-    const result = await getAwinProgramDetails(94973);
+    const result = await getAwinProgramDetails(94973, { fallbackDelayMs: 0 });
+
+    assert.equal(requestedUrls.length, 2);
+    assert.equal(requestedUrls[0].searchParams.has("relationship"), false);
+    assert.equal(requestedUrls[1].searchParams.get("relationship"), "any");
     assert.equal(result.programmeInfo.membershipStatus, "Not joined");
     assert.deepEqual(result.commissionRange, []);
   });
 
-  it("maps advertiser-level missing relationship responses to a terminal merchant miss", async () => {
+  it("does not hide non-relationship authorization errors behind the fallback", async () => {
     process.env.AWIN_API_TOKEN = "test-token";
     process.env.AWIN_PUBLISHER_ID = "1952827";
 
-    globalThis.fetch = async () =>
-      new Response(
+    let requestCount = 0;
+    globalThis.fetch = async () => {
+      requestCount += 1;
+      return new Response(
         JSON.stringify({
-          error: "missing.relationship",
-          description:
-            "No relationship exists between publisherId 1952827 and advertiserId 3",
+          error: "forbidden",
+          description: "Publisher access is forbidden",
         }),
         {
           status: 403,
           headers: { "Content-Type": "application/json" },
         },
       );
+    };
 
     await assert.rejects(
-      () => getAwinProgramDetails(3),
+      () => getAwinProgramDetails(3, { fallbackDelayMs: 0 }),
       (error) => {
-        assert.equal(error.status, 403);
         assert.equal(error.code, "AWIN_NOT_FOUND");
-        assert.match(error.message, /No relationship exists/);
+        assert.match(error.message, /forbidden/i);
         return true;
       },
     );
+    assert.equal(requestCount, 1);
   });
 });

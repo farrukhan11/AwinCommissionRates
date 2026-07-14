@@ -3,6 +3,10 @@ import { AwinApiError } from "./errors";
 const AWIN_BASE_URL = "https://api.awin.com";
 const DEFAULT_PUBLISHER_ID = "1952827";
 const REQUEST_TIMEOUT_MS = 30_000;
+const DEFAULT_FALLBACK_DELAY_MS = 3_200;
+
+const sleep = (milliseconds) =>
+  new Promise((resolve) => setTimeout(resolve, milliseconds));
 
 function parseRetryAfter(headerValue) {
   if (!headerValue) {
@@ -59,13 +63,10 @@ function mapHttpStatusToError(status, retryAfterSeconds, responseData) {
     .filter(Boolean)
     .join(": ");
 
-  // Awin can return missing.relationship/403 for one advertiser even though the
-  // publisher token and account are valid. Treat that as a terminal merchant
-  // miss so one inaccessible programme cannot stop a 20k-programme sync.
   if (awinError.code === "missing.relationship") {
     return new AwinApiError(
       status,
-      "AWIN_NOT_FOUND",
+      "AWIN_MISSING_RELATIONSHIP",
       awinError.description || "No relationship exists for this advertiser",
     );
   }
@@ -130,6 +131,14 @@ function getApiToken() {
   }
 
   return apiToken;
+}
+
+function getFallbackDelayMs(options) {
+  const value = options?.fallbackDelayMs;
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+    return DEFAULT_FALLBACK_DELAY_MS;
+  }
+  return Math.floor(value);
 }
 
 async function awinGet(path, queryParams) {
@@ -201,7 +210,7 @@ async function awinGet(path, queryParams) {
   }
 }
 
-export async function getAwinProgramDetails(advertiserId) {
+export async function getAwinProgramDetails(advertiserId, options = {}) {
   if (!Number.isInteger(advertiserId) || advertiserId <= 0) {
     throw new AwinApiError(
       400,
@@ -211,15 +220,32 @@ export async function getAwinProgramDetails(advertiserId) {
   }
 
   const publisherId = getPublisherId();
+  const path = `/publishers/${publisherId}/programmedetails`;
+  const baseQuery = { advertiserId: String(advertiserId) };
 
-  // Awin defaults this endpoint to relationship=joined when the parameter is
-  // omitted. The directory contains joined and not-joined programmes, so bulk
-  // synchronization must use relationship=any to avoid missing.relationship
-  // failures while still receiving commissionRange wherever Awin exposes it.
-  return awinGet(`/publishers/${publisherId}/programmedetails`, {
-    advertiserId: String(advertiserId),
-    relationship: "any",
-  });
+  // Awin returns joined commissionRange correctly when relationship is omitted.
+  // relationship=any can suppress that range, so only use it as a fallback when
+  // the default joined lookup explicitly reports missing.relationship.
+  try {
+    return await awinGet(path, baseQuery);
+  } catch (error) {
+    if (
+      !(error instanceof AwinApiError) ||
+      error.code !== "AWIN_MISSING_RELATIONSHIP"
+    ) {
+      throw error;
+    }
+
+    const fallbackDelayMs = getFallbackDelayMs(options);
+    if (fallbackDelayMs > 0) {
+      await sleep(fallbackDelayMs);
+    }
+
+    return awinGet(path, {
+      ...baseQuery,
+      relationship: "any",
+    });
+  }
 }
 
 export async function getAwinProgrammes(options = {}) {

@@ -1,4 +1,4 @@
-export const AWIN_DETAIL_FETCH_VERSION = 3;
+export const AWIN_DETAIL_FETCH_VERSION = 4;
 
 function isRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -59,7 +59,7 @@ export function normalizeAwinProgramDetails(raw) {
   const normalized = {
     programmeDetails: raw,
     detailFetchVersion: AWIN_DETAIL_FETCH_VERSION,
-    detailFetchStrategy: "programmedetails-relationship-any",
+    detailFetchStrategy: "programmedetails-default-then-any-fallback",
   };
 
   if (!isRecord(raw)) {
