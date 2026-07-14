@@ -1,5 +1,6 @@
 import AwinMerchant from "@/models/AwinMerchant";
 import AwinDetailSyncRun from "@/models/AwinDetailSyncRun";
+import { AWIN_DETAIL_FETCH_VERSION } from "@/lib/awin/program-details";
 
 export class DetailSyncConflictError extends Error {
   constructor() {
@@ -54,6 +55,7 @@ function buildMerchantFilter(input) {
     filter.$or = [
       { detailsFetchedAt: { $exists: false } },
       { programmeDetails: { $exists: false } },
+      { detailFetchVersion: { $ne: AWIN_DETAIL_FETCH_VERSION } },
     ];
   } else if (input.mode === "stale") {
     const cutoff = new Date(
@@ -62,6 +64,7 @@ function buildMerchantFilter(input) {
     filter.$or = [
       { detailsFetchedAt: { $exists: false } },
       { detailsFetchedAt: { $lt: cutoff } },
+      { detailFetchVersion: { $ne: AWIN_DETAIL_FETCH_VERSION } },
     ];
   }
 

@@ -1,3 +1,5 @@
+export const AWIN_DETAIL_FETCH_VERSION = 2;
+
 function isRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -54,7 +56,11 @@ export function formatCommissionRange(commissionRange, currencyCode) {
 }
 
 export function normalizeAwinProgramDetails(raw) {
-  const normalized = { programmeDetails: raw };
+  const normalized = {
+    programmeDetails: raw,
+    detailFetchVersion: AWIN_DETAIL_FETCH_VERSION,
+    detailFetchStrategy: "programmedetails-default",
+  };
 
   if (!isRecord(raw)) {
     return normalized;
@@ -110,11 +116,11 @@ export function normalizeAwinProgramDetails(raw) {
     normalized.commissionUnavailableReason = "";
   } else {
     normalized.commissionDisplay =
-      membershipKey === "notjoined" ? "Not available (not joined)" : "Not provided";
+      membershipKey === "notjoined" ? "Not disclosed by Awin" : "Not provided";
     normalized.commissionFetchStatus = "unavailable";
     normalized.commissionUnavailableReason =
       membershipKey === "notjoined"
-        ? "Awin does not expose commissionRange for a programme this publisher has not joined"
+        ? "Awin returned an empty commissionRange for this not-joined programme"
         : "Awin did not provide commissionRange for this programme";
   }
 

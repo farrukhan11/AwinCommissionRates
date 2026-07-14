@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  AWIN_DETAIL_FETCH_VERSION,
   formatCommissionRange,
   normalizeAwinProgramDetails,
 } from "./program-details.js";
@@ -14,6 +15,13 @@ describe("formatCommissionRange", () => {
         "GBP",
       ),
       "5% - 10%",
+    );
+  });
+
+  it("keeps zero as a valid commission minimum", () => {
+    assert.equal(
+      formatCommissionRange([{ min: 0, max: 8, type: "percentage" }], "USD"),
+      "0% - 8%",
     );
   });
 
@@ -53,18 +61,21 @@ describe("normalizeAwinProgramDetails", () => {
     assert.equal(result.commissionType, "percentage");
     assert.equal(result.commissionDisplay, "2% - 5% / 1% - 8%");
     assert.equal(result.commissionFetchStatus, "fetched");
+    assert.equal(result.detailFetchVersion, AWIN_DETAIL_FETCH_VERSION);
+    assert.equal(result.detailFetchStrategy, "programmedetails-default");
   });
 
-  it("marks a not-joined programme without a range as unavailable", () => {
+  it("marks a not-joined programme without a range as undisclosed", () => {
     const result = normalizeAwinProgramDetails({
       programmeInfo: {
         id: 3,
         name: "Awin",
         membershipStatus: "Not joined",
       },
+      commissionRange: [],
     });
 
-    assert.equal(result.commissionDisplay, "Not available (not joined)");
+    assert.equal(result.commissionDisplay, "Not disclosed by Awin");
     assert.equal(result.commissionFetchStatus, "unavailable");
   });
 
@@ -72,5 +83,6 @@ describe("normalizeAwinProgramDetails", () => {
     const result = normalizeAwinProgramDetails(["unexpected"]);
     assert.deepEqual(result.programmeDetails, ["unexpected"]);
     assert.equal(result.programmeName, undefined);
+    assert.equal(result.detailFetchVersion, AWIN_DETAIL_FETCH_VERSION);
   });
 });

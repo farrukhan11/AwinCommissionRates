@@ -1,7 +1,7 @@
 import { AwinApiError } from "./errors";
 
 const AWIN_BASE_URL = "https://api.awin.com";
-const DEFAULT_PUBLISHER_ID = "1951827";
+const DEFAULT_PUBLISHER_ID = "1952827";
 const REQUEST_TIMEOUT_MS = 30_000;
 
 function parseRetryAfter(headerValue) {
@@ -152,7 +152,7 @@ async function awinGet(path, queryParams) {
   }
 }
 
-export async function getAwinProgramDetails(advertiserId, options = {}) {
+export async function getAwinProgramDetails(advertiserId) {
   if (!Number.isInteger(advertiserId) || advertiserId <= 0) {
     throw new AwinApiError(
       400,
@@ -161,12 +161,13 @@ export async function getAwinProgramDetails(advertiserId, options = {}) {
     );
   }
 
-  const relationship = options.relationship === "joined" ? "joined" : "any";
   const publisherId = getPublisherId();
 
+  // Do not send relationship=joined/any/notjoined here. Awin's default
+  // resolution returns the current programme relationship and, where exposed,
+  // the commissionRange. This matches the working Postman request.
   return awinGet(`/publishers/${publisherId}/programmedetails`, {
     advertiserId: String(advertiserId),
-    relationship,
   });
 }
 
