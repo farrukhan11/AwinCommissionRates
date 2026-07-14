@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { MongoBulkWriteError } from "mongodb";
 
 import { isValidAdminApiKey } from "@/lib/auth/admin-api-key";
 import { getAwinProgrammes } from "@/lib/awin/client";
@@ -34,6 +33,30 @@ function isDuplicateKeyError(error: unknown) {
   return isRecord(error) && error.code === 11000;
 }
 
+function readNonNegativeInteger(value: unknown): number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0
+    ? value
+    : 0;
+}
+
+function getBulkWriteErrorSummary(error: unknown) {
+  if (!isRecord(error)) return null;
+
+  const result = isRecord(error.result) ? error.result : null;
+  const writeErrors = Array.isArray(error.writeErrors) ? error.writeErrors : null;
+  const errorName = typeof error.name === "string" ? error.name : "";
+  const isBulkWriteError = errorName === "MongoBulkWriteError" || writeErrors !== null;
+
+  if (!isBulkWriteError || !result) return null;
+
+  return {
+    insertedCount: readNonNegativeInteger(result.upsertedCount),
+    matchedCount: readNonNegativeInteger(result.matchedCount),
+    modifiedCount: readNonNegativeInteger(result.modifiedCount),
+    failedCount: writeErrors?.length ?? 1,
+  };
+}
+
 async function bulkUpsertProgrammes(
   programmes: NormalizedAwinProgramme[],
   importStartedAt: Date,
@@ -54,11 +77,13 @@ async function bulkUpsertProgrammes(
       matchedCount += result.matchedCount;
       modifiedCount += result.modifiedCount;
     } catch (error) {
-      if (!(error instanceof MongoBulkWriteError)) throw error;
-      insertedCount += error.result.upsertedCount;
-      matchedCount += error.result.matchedCount;
-      modifiedCount += error.result.modifiedCount;
-      failedCount += Array.isArray(error.writeErrors) ? error.writeErrors.length : 1;
+      const summary = getBulkWriteErrorSummary(error);
+      if (!summary) throw error;
+
+      insertedCount += summary.insertedCount;
+      matchedCount += summary.matchedCount;
+      modifiedCount += summary.modifiedCount;
+      failedCount += summary.failedCount;
     }
   }
 
