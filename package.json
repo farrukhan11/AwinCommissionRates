@@ -2,13 +2,13 @@
   "name": "commission-awin",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "typecheck": "tsc --noEmit",
-    "test": "node --experimental-transform-types --test src/lib/awin/normalizers.test.ts src/lib/awin/program-details.test.ts",
+    "test": "node --test src/lib/awin/normalizers.test.js src/lib/awin/program-details.test.js",
     "worker": "node --env-file=.env.local scripts/awin-detail-worker.mjs",
     "scheduler": "node --env-file=.env.local scripts/awin-scheduler.mjs"
   },
@@ -20,12 +20,8 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
-    "@types/node": "^20",
-    "@types/react": "^19",
-    "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.2.10",
-    "tailwindcss": "^4",
-    "typescript": "^5"
+    "tailwindcss": "^4"
   }
 }
