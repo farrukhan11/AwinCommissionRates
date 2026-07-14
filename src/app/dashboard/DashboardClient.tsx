@@ -134,8 +134,11 @@ export default function DashboardClient() {
   }, [api, apiKey, page, search, statusFilter]);
 
   useEffect(() => {
-    const saved = sessionStorage.getItem("awin-admin-api-key");
-    if (saved) setApiKey(saved);
+    const timer = window.setTimeout(() => {
+      const saved = sessionStorage.getItem("awin-admin-api-key");
+      if (saved) setApiKey(saved);
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, []);
 
   useEffect(() => {
