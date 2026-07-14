@@ -1,6 +1,6 @@
+import { randomUUID } from "node:crypto";
 import os from "node:os";
 import process from "node:process";
-import { randomUUID } from "node:crypto";
 import mongoose from "mongoose";
 
 const MONGODB_URI = process.env.MONGODB_URI;
@@ -8,14 +8,14 @@ const AWIN_API_TOKEN = process.env.AWIN_API_TOKEN;
 const AWIN_PUBLISHER_ID = process.env.AWIN_PUBLISHER_ID ?? "1951827";
 const WORKER_ID = `${os.hostname()}:${process.pid}:${randomUUID().slice(0, 8)}`;
 const LEASE_MS = 2 * 60 * 1000;
-const STUCK_PROCESSING_MS = 10 * 60 * 1000;
+const HEARTBEAT_INTERVAL_MS = 30_000;
+const STUCK_PROCESSING_MS = 5 * 60 * 1000;
 const IDLE_POLL_MS = 10_000;
 const REQUEST_TIMEOUT_MS = 30_000;
 
 if (!MONGODB_URI) throw new Error("MONGODB_URI is not configured");
 if (!AWIN_API_TOKEN) throw new Error("AWIN_API_TOKEN is not configured");
 
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 let shuttingDown = false;
 
 class AwinRequestError extends Error {
@@ -39,7 +39,7 @@ const merchantSchema = new mongoose.Schema(
     programmeInfo: mongoose.Schema.Types.Mixed,
     detailsFetchedAt: Date,
     syncStatus: String,
-    syncAttempts: Number,
+    syncAttempts: { type: Number, default: 0 },
     lastSyncError: String,
     primaryRegion: String,
     countryCode: String,
@@ -48,7 +48,7 @@ const merchantSchema = new mongoose.Schema(
     displayUrl: String,
     logoUrl: String,
     detailSyncRunId: mongoose.Schema.Types.ObjectId,
-    detailRunAttempts: Number,
+    detailRunAttempts: { type: Number, default: 0 },
     detailSyncQueuedAt: Date,
     detailSyncLockedAt: Date,
     lastSyncAttemptAt: Date,
@@ -60,6 +60,8 @@ const merchantSchema = new mongoose.Schema(
   },
   { timestamps: true, strict: false },
 );
+
+merchantSchema.index({ detailSyncRunId: 1, syncStatus: 1, nextRetryAt: 1 });
 
 const runSchema = new mongoose.Schema(
   {
@@ -86,19 +88,26 @@ const runSchema = new mongoose.Schema(
   { timestamps: true, strict: false },
 );
 
+runSchema.index({ activeLock: 1 }, { unique: true, sparse: true });
+runSchema.index({ status: 1, createdAt: 1 });
+
 const AwinMerchant =
   mongoose.models.AwinMerchant ?? mongoose.model("AwinMerchant", merchantSchema);
 const AwinDetailSyncRun =
   mongoose.models.AwinDetailSyncRun ??
   mongoose.model("AwinDetailSyncRun", runSchema);
 
+const sleep = (milliseconds) =>
+  new Promise((resolve) => setTimeout(resolve, milliseconds));
+
 function parseRetryAfter(value) {
   if (!value) return undefined;
   const seconds = Number.parseInt(value, 10);
   if (Number.isFinite(seconds) && seconds >= 0) return seconds;
-  const date = Date.parse(value);
-  if (Number.isNaN(date)) return undefined;
-  return Math.max(1, Math.ceil((date - Date.now()) / 1000));
+
+  const retryDate = Date.parse(value);
+  if (Number.isNaN(retryDate)) return undefined;
+  return Math.max(1, Math.ceil((retryDate - Date.now()) / 1000));
 }
 
 async function getProgramDetails(advertiserId) {
@@ -120,31 +129,80 @@ async function getProgramDetails(advertiserId) {
       signal: controller.signal,
     });
 
-    const text = await response.text();
+    const responseText = await response.text();
     let data;
     try {
-      data = text ? JSON.parse(text) : null;
+      data = responseText ? JSON.parse(responseText) : null;
     } catch {
-      throw new AwinRequestError(502, "AWIN_INVALID_RESPONSE", "Awin returned invalid JSON");
+      throw new AwinRequestError(
+        502,
+        "AWIN_INVALID_RESPONSE",
+        "Awin returned invalid JSON",
+      );
     }
 
     if (!response.ok) {
-      const retryAfter = parseRetryAfter(response.headers.get("Retry-After"));
-      if (response.status === 401) throw new AwinRequestError(401, "AWIN_UNAUTHORIZED", "Awin authentication failed");
-      if (response.status === 403) throw new AwinRequestError(403, "AWIN_FORBIDDEN", "Awin access forbidden");
-      if (response.status === 404) throw new AwinRequestError(404, "AWIN_NOT_FOUND", "Awin programme not found");
-      if (response.status === 429) throw new AwinRequestError(429, "AWIN_RATE_LIMITED", "Awin rate limit reached", retryAfter);
-      if (response.status >= 500) throw new AwinRequestError(response.status, "AWIN_SERVER_ERROR", "Awin server error");
-      throw new AwinRequestError(response.status, "AWIN_REQUEST_FAILED", "Awin request failed");
+      const retryAfterSeconds = parseRetryAfter(
+        response.headers.get("Retry-After"),
+      );
+      if (response.status === 401) {
+        throw new AwinRequestError(
+          401,
+          "AWIN_UNAUTHORIZED",
+          "Awin authentication failed",
+        );
+      }
+      if (response.status === 403) {
+        throw new AwinRequestError(
+          403,
+          "AWIN_FORBIDDEN",
+          "Awin access forbidden",
+        );
+      }
+      if (response.status === 404) {
+        throw new AwinRequestError(
+          404,
+          "AWIN_NOT_FOUND",
+          "Awin programme not found",
+        );
+      }
+      if (response.status === 429) {
+        throw new AwinRequestError(
+          429,
+          "AWIN_RATE_LIMITED",
+          "Awin rate limit reached",
+          retryAfterSeconds,
+        );
+      }
+      if (response.status >= 500) {
+        throw new AwinRequestError(
+          response.status,
+          "AWIN_SERVER_ERROR",
+          "Awin server error",
+        );
+      }
+      throw new AwinRequestError(
+        response.status,
+        "AWIN_REQUEST_FAILED",
+        "Awin request failed",
+      );
     }
 
     return data;
   } catch (error) {
     if (error instanceof AwinRequestError) throw error;
     if (error instanceof Error && error.name === "AbortError") {
-      throw new AwinRequestError(504, "AWIN_TIMEOUT", "Awin request timed out");
+      throw new AwinRequestError(
+        504,
+        "AWIN_TIMEOUT",
+        "Awin request timed out",
+      );
     }
-    throw new AwinRequestError(502, "AWIN_REQUEST_FAILED", "Awin request failed");
+    throw new AwinRequestError(
+      502,
+      "AWIN_REQUEST_FAILED",
+      "Awin request failed",
+    );
   } finally {
     clearTimeout(timeout);
   }
@@ -155,18 +213,22 @@ function isRecord(value) {
 }
 
 function finiteNumber(value) {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+  return typeof value === "number" && Number.isFinite(value)
+    ? value
+    : undefined;
 }
 
 function stringValue(value) {
-  return typeof value === "string" && value.trim() ? value : undefined;
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
 function normalizeDetails(raw) {
   const fields = { programmeDetails: raw };
   if (!isRecord(raw)) return fields;
 
-  if (raw.commissionRange !== undefined) fields.commissionRange = raw.commissionRange;
+  if (raw.commissionRange !== undefined) {
+    fields.commissionRange = raw.commissionRange;
+  }
   if (raw.kpi !== undefined) fields.kpi = raw.kpi;
   if (raw.programmeInfo !== undefined) fields.programmeInfo = raw.programmeInfo;
 
@@ -180,9 +242,11 @@ function normalizeDetails(raw) {
       currencyCode: stringValue(info.currencyCode),
       sector: stringValue(info.primarySector),
     };
+
     for (const [key, value] of Object.entries(mappings)) {
       if (value !== undefined) fields[key] = value;
     }
+
     if (isRecord(info.primaryRegion)) {
       const region = stringValue(info.primaryRegion.name);
       const country = stringValue(info.primaryRegion.countryCode);
@@ -193,11 +257,18 @@ function normalizeDetails(raw) {
 
   if (Array.isArray(raw.commissionRange)) {
     const ranges = raw.commissionRange.filter(isRecord);
-    const mins = ranges.map((item) => finiteNumber(item.min)).filter((item) => item !== undefined);
-    const maxes = ranges.map((item) => finiteNumber(item.max)).filter((item) => item !== undefined);
-    const types = ranges.map((item) => stringValue(item.type)).filter(Boolean);
-    if (mins.length) fields.commissionMin = Math.min(...mins);
-    if (maxes.length) fields.commissionMax = Math.max(...maxes);
+    const minimums = ranges
+      .map((range) => finiteNumber(range.min))
+      .filter((value) => value !== undefined);
+    const maximums = ranges
+      .map((range) => finiteNumber(range.max))
+      .filter((value) => value !== undefined);
+    const types = ranges
+      .map((range) => stringValue(range.type))
+      .filter(Boolean);
+
+    if (minimums.length) fields.commissionMin = Math.min(...minimums);
+    if (maximums.length) fields.commissionMax = Math.max(...maximums);
     if (types.length) fields.commissionType = [...new Set(types)].join(",");
   }
 
@@ -231,12 +302,13 @@ async function acquireRun() {
     run.startedAt = now;
     await run.save();
   }
+
   return run;
 }
 
 async function heartbeat(runId, advertiserId) {
   const now = new Date();
-  await AwinDetailSyncRun.updateOne(
+  const result = await AwinDetailSyncRun.updateOne(
     { _id: runId, workerId: WORKER_ID },
     {
       $set: {
@@ -246,6 +318,18 @@ async function heartbeat(runId, advertiserId) {
       },
     },
   );
+  return result.modifiedCount === 1 || result.matchedCount === 1;
+}
+
+async function sleepWithHeartbeat(runId, milliseconds) {
+  let remaining = milliseconds;
+  while (!shuttingDown && remaining > 0) {
+    const chunk = Math.min(remaining, HEARTBEAT_INTERVAL_MS);
+    await sleep(chunk);
+    remaining -= chunk;
+    if (!(await heartbeat(runId))) return false;
+  }
+  return !shuttingDown;
 }
 
 async function releaseLease(runId) {
@@ -270,13 +354,58 @@ async function failRun(runId, code, message) {
   );
 }
 
+async function requeueStuckMerchants(runId) {
+  const stuckBefore = new Date(Date.now() - STUCK_PROCESSING_MS);
+  return AwinMerchant.updateMany(
+    {
+      detailSyncRunId: runId,
+      syncStatus: "processing",
+      detailSyncLockedAt: { $lt: stuckBefore },
+    },
+    {
+      $set: { syncStatus: "pending" },
+      $unset: { detailSyncLockedAt: "" },
+    },
+  );
+}
+
+async function failExhaustedPending(runId, maxAttempts) {
+  return AwinMerchant.updateMany(
+    {
+      detailSyncRunId: runId,
+      syncStatus: "pending",
+      detailRunAttempts: { $gte: maxAttempts },
+    },
+    {
+      $set: {
+        syncStatus: "failed",
+        lastSyncError: "Maximum detail sync attempts reached",
+      },
+      $unset: { detailSyncLockedAt: "", nextRetryAt: "" },
+    },
+  );
+}
+
 async function finalizeRun(run) {
-  const [successCount, failedCount, pendingCount, processingCount] = await Promise.all([
-    AwinMerchant.countDocuments({ detailSyncRunId: run._id, syncStatus: "completed" }),
-    AwinMerchant.countDocuments({ detailSyncRunId: run._id, syncStatus: "failed" }),
-    AwinMerchant.countDocuments({ detailSyncRunId: run._id, syncStatus: "pending" }),
-    AwinMerchant.countDocuments({ detailSyncRunId: run._id, syncStatus: "processing" }),
-  ]);
+  const [successCount, failedCount, pendingCount, processingCount] =
+    await Promise.all([
+      AwinMerchant.countDocuments({
+        detailSyncRunId: run._id,
+        syncStatus: "completed",
+      }),
+      AwinMerchant.countDocuments({
+        detailSyncRunId: run._id,
+        syncStatus: "failed",
+      }),
+      AwinMerchant.countDocuments({
+        detailSyncRunId: run._id,
+        syncStatus: "pending",
+      }),
+      AwinMerchant.countDocuments({
+        detailSyncRunId: run._id,
+        syncStatus: "processing",
+      }),
+    ]);
 
   if (pendingCount > 0 || processingCount > 0) return false;
 
@@ -294,27 +423,17 @@ async function finalizeRun(run) {
     },
   );
 
-  console.log(`[worker] run ${run._id} completed: ${successCount} success, ${failedCount} failed`);
+  console.log(
+    `[worker] run ${run._id} completed: ${successCount} success, ${failedCount} failed`,
+  );
   return true;
 }
 
 async function processRun(run) {
-  const stuckBefore = new Date(Date.now() - STUCK_PROCESSING_MS);
-  await AwinMerchant.updateMany(
-    {
-      detailSyncRunId: run._id,
-      syncStatus: "processing",
-      detailSyncLockedAt: { $lt: stuckBefore },
-    },
-    {
-      $set: { syncStatus: "pending" },
-      $unset: { detailSyncLockedAt: "" },
-    },
-  );
-
   while (!shuttingDown) {
     const freshRun = await AwinDetailSyncRun.findById(run._id).lean();
     if (!freshRun) return;
+
     if (freshRun.status === "paused") {
       await releaseLease(run._id);
       return;
@@ -323,15 +442,21 @@ async function processRun(run) {
       await releaseLease(run._id);
       return;
     }
+    if (!(await heartbeat(run._id))) return;
 
-    await heartbeat(run._id);
+    const maxAttempts = freshRun.maxAttempts ?? 5;
+    await failExhaustedPending(run._id, maxAttempts);
+
     const now = new Date();
     const merchant = await AwinMerchant.findOneAndUpdate(
       {
         detailSyncRunId: run._id,
         syncStatus: "pending",
-        detailRunAttempts: { $lt: freshRun.maxAttempts ?? 5 },
-        $or: [{ nextRetryAt: { $exists: false } }, { nextRetryAt: { $lte: now } }],
+        detailRunAttempts: { $lt: maxAttempts },
+        $or: [
+          { nextRetryAt: { $exists: false } },
+          { nextRetryAt: { $lte: now } },
+        ],
       },
       {
         $set: {
@@ -345,7 +470,15 @@ async function processRun(run) {
     );
 
     if (!merchant) {
-      const pending = await AwinMerchant.findOne({
+      const recovered = await requeueStuckMerchants(run._id);
+      if (recovered.modifiedCount > 0) {
+        console.warn(
+          `[worker] recovered ${recovered.modifiedCount} stuck merchant(s)`,
+        );
+        continue;
+      }
+
+      const nextPending = await AwinMerchant.findOne({
         detailSyncRunId: run._id,
         syncStatus: "pending",
       })
@@ -353,16 +486,28 @@ async function processRun(run) {
         .select("nextRetryAt")
         .lean();
 
-      if (pending) {
-        const waitMs = pending.nextRetryAt
-          ? Math.max(1000, Math.min(60_000, pending.nextRetryAt.getTime() - Date.now()))
-          : 5000;
-        await sleep(waitMs);
+      if (nextPending) {
+        const waitMs = nextPending.nextRetryAt
+          ? Math.max(
+              1_000,
+              Math.min(60_000, nextPending.nextRetryAt.getTime() - Date.now()),
+            )
+          : 3_000;
+        if (!(await sleepWithHeartbeat(run._id, waitMs))) return;
+        continue;
+      }
+
+      const processingExists = await AwinMerchant.exists({
+        detailSyncRunId: run._id,
+        syncStatus: "processing",
+      });
+      if (processingExists) {
+        if (!(await sleepWithHeartbeat(run._id, 3_000))) return;
         continue;
       }
 
       if (await finalizeRun(freshRun)) return;
-      await sleep(3000);
+      if (!(await sleepWithHeartbeat(run._id, 3_000))) return;
       continue;
     }
 
@@ -404,10 +549,15 @@ async function processRun(run) {
       const awinError =
         error instanceof AwinRequestError
           ? error
-          : new AwinRequestError(500, "WORKER_ERROR", "Unexpected worker error");
+          : new AwinRequestError(
+              500,
+              "WORKER_ERROR",
+              "Unexpected worker error",
+            );
       const attempts = merchant.detailRunAttempts ?? 1;
-      const maxAttempts = freshRun.maxAttempts ?? 5;
-      const fatal = ["AWIN_UNAUTHORIZED", "AWIN_FORBIDDEN"].includes(awinError.code);
+      const fatal = ["AWIN_UNAUTHORIZED", "AWIN_FORBIDDEN"].includes(
+        awinError.code,
+      );
 
       if (fatal) {
         await AwinMerchant.updateOne(
@@ -428,9 +578,10 @@ async function processRun(run) {
           {
             $set: {
               syncStatus: "pending",
-              nextRetryAt: new Date(Date.now() + retrySeconds * 1000),
+              nextRetryAt: new Date(Date.now() + retrySeconds * 1_000),
               lastSyncError: awinError.message,
             },
+            $inc: { detailRunAttempts: -1 },
             $unset: { detailSyncLockedAt: "" },
           },
         );
@@ -438,19 +589,22 @@ async function processRun(run) {
           { _id: run._id },
           { $inc: { rateLimitCount: 1, retryCount: 1 } },
         );
-        console.warn(`[worker] rate limited; sleeping ${retrySeconds}s`);
-        await sleep(retrySeconds * 1000);
+        console.warn(`[worker] rate limited; waiting ${retrySeconds}s`);
+        if (!(await sleepWithHeartbeat(run._id, retrySeconds * 1_000))) return;
         continue;
       }
 
       if (attempts < maxAttempts && awinError.code !== "AWIN_NOT_FOUND") {
-        const retrySeconds = Math.min(15 * 60, 15 * 2 ** Math.max(0, attempts - 1));
+        const retrySeconds = Math.min(
+          15 * 60,
+          15 * 2 ** Math.max(0, attempts - 1),
+        );
         await AwinMerchant.updateOne(
           { _id: merchant._id },
           {
             $set: {
               syncStatus: "pending",
-              nextRetryAt: new Date(Date.now() + retrySeconds * 1000),
+              nextRetryAt: new Date(Date.now() + retrySeconds * 1_000),
               lastSyncError: awinError.message,
             },
             $unset: { detailSyncLockedAt: "" },
@@ -479,9 +633,10 @@ async function processRun(run) {
         console.error(`[worker] ${advertiserId} failed: ${awinError.code}`);
       }
     } finally {
-      await heartbeat(run._id, advertiserId);
+      if (!shuttingDown) await heartbeat(run._id, advertiserId);
       if (calledAwin && !shuttingDown) {
-        await sleep(Math.max(3100, freshRun.requestDelayMs ?? 3200));
+        const requestDelay = Math.max(3_100, freshRun.requestDelayMs ?? 3_200);
+        if (!(await sleepWithHeartbeat(run._id, requestDelay))) return;
       }
     }
   }
@@ -491,6 +646,7 @@ async function processRun(run) {
 
 async function main() {
   await mongoose.connect(MONGODB_URI, { bufferCommands: false });
+  await Promise.all([AwinMerchant.init(), AwinDetailSyncRun.init()]);
   console.log(`[worker] connected as ${WORKER_ID}`);
 
   while (!shuttingDown) {
@@ -499,6 +655,7 @@ async function main() {
       await sleep(IDLE_POLL_MS);
       continue;
     }
+
     console.log(`[worker] processing run ${run._id} (${run.mode})`);
     await processRun(run);
   }
@@ -513,7 +670,10 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
 
 main()
   .catch((error) => {
-    console.error("[worker] fatal error", error instanceof Error ? error.message : "unknown");
+    console.error(
+      "[worker] fatal error",
+      error instanceof Error ? error.message : "unknown",
+    );
     process.exitCode = 1;
   })
   .finally(async () => {
