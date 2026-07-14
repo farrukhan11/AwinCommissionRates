@@ -212,11 +212,13 @@ export async function getAwinProgramDetails(advertiserId) {
 
   const publisherId = getPublisherId();
 
-  // Do not send relationship=joined/any/notjoined here. Awin's default
-  // resolution returns the current programme relationship and, where exposed,
-  // the commissionRange. This matches the working Postman request.
+  // Awin defaults this endpoint to relationship=joined when the parameter is
+  // omitted. The directory contains joined and not-joined programmes, so bulk
+  // synchronization must use relationship=any to avoid missing.relationship
+  // failures while still receiving commissionRange wherever Awin exposes it.
   return awinGet(`/publishers/${publisherId}/programmedetails`, {
     advertiserId: String(advertiserId),
+    relationship: "any",
   });
 }
 
