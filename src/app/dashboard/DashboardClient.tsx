@@ -1,27 +1,31 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import type { FormEvent } from "react";
 
-type DetailStatus = {
-  latestRun: null | {
-    id: string;
-    mode: string;
-    status: string;
-    totalQueued: number;
-    processedCount: number;
-    successCount: number;
-    failedCount: number;
-    retryCount: number;
-    rateLimitCount: number;
-    progressPercentage: number;
-    estimatedSeconds: number;
-    lastHeartbeatAt?: string;
-  };
+type DetailRun = {
+  id: string;
+  mode: string;
+  status: string;
+  totalQueued: number;
+  processedCount: number;
+  successCount: number;
+  failedCount: number;
+  retryCount: number;
+  rateLimitCount: number;
+  progressPercentage: number;
+  estimatedSeconds: number;
 };
 
 type DirectoryStatus = {
-  latestRun: null | { status: string; totalReceived: number; validProgrammes: number; invalidProgrammes: number };
-  merchants: { total: number; active: number; missing: number; pendingDetails: number; completedDetails: number; failedDetails: number };
+  merchants: {
+    total: number;
+    active: number;
+    missing: number;
+    pendingDetails: number;
+    completedDetails: number;
+    failedDetails: number;
+  };
 };
 
 type Merchant = {
@@ -30,7 +34,6 @@ type Merchant = {
   programmeName?: string;
   membershipStatus?: string;
   countryCode?: string;
-  currencyCode?: string;
   syncStatus: string;
   commissionMin?: number;
   commissionMax?: number;
@@ -46,11 +49,25 @@ function duration(seconds: number) {
   return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
 }
 
+function errorMessage(data: unknown, status: number) {
+  if (
+    typeof data === "object" &&
+    data !== null &&
+    "error" in data &&
+    typeof (data as { error?: unknown }).error === "object" &&
+    (data as { error?: { message?: unknown } }).error?.message &&
+    typeof (data as { error: { message: unknown } }).error.message === "string"
+  ) {
+    return (data as { error: { message: string } }).error.message;
+  }
+  return `Request failed (${status})`;
+}
+
 export default function DashboardClient() {
   const [apiKey, setApiKey] = useState("");
   const [authenticated, setAuthenticated] = useState(false);
   const [directory, setDirectory] = useState<DirectoryStatus | null>(null);
-  const [details, setDetails] = useState<DetailStatus | null>(null);
+  const [run, setRun] = useState<DetailRun | null>(null);
   const [merchants, setMerchants] = useState<Merchant[]>([]);
   const [page, setPage] = useState(1);
   const [pages, setPages] = useState(1);
@@ -60,25 +77,24 @@ export default function DashboardClient() {
   const [busy, setBusy] = useState(false);
 
   const api = useCallback(
-    async (path: string, init?: RequestInit) => {
+    async (path: string, init?: RequestInit): Promise<unknown> => {
+      const headers = new Headers(init?.headers);
+      headers.set("x-admin-api-key", apiKey);
+      if (init?.body && !headers.has("Content-Type")) {
+        headers.set("Content-Type", "application/json");
+      }
+
       const response = await fetch(path, {
         ...init,
-        headers: {
-          "x-admin-api-key": apiKey,
-          ...(init?.body ? { "Content-Type": "application/json" } : {}),
-          ...init?.headers,
-        },
+        headers,
         cache: "no-store",
       });
       const contentType = response.headers.get("content-type") ?? "";
-      const data = contentType.includes("application/json") ? await response.json() : await response.text();
-      if (!response.ok) {
-        const errorMessage =
-          typeof data === "object" && data && "error" in data
-            ? (data as { error?: { message?: string } }).error?.message
-            : undefined;
-        throw new Error(errorMessage ?? `Request failed (${response.status})`);
-      }
+      const data: unknown = contentType.includes("application/json")
+        ? await response.json()
+        : await response.text();
+
+      if (!response.ok) throw new Error(errorMessage(data, response.status));
       return data;
     },
     [apiKey],
@@ -94,14 +110,22 @@ export default function DashboardClient() {
       const [directoryData, detailData, merchantData] = await Promise.all([
         api("/api/awin/import-programmes/status"),
         api("/api/awin/detail-sync/status"),
-        api(`/api/awin/merchants?${params}`),
+        api(`/api/awin/merchants?${params.toString()}`),
       ]);
-      setDirectory(directoryData as DirectoryStatus);
-      setDetails(detailData as DetailStatus);
-      const listed = merchantData as { merchants: Merchant[]; pagination: { pages: number } };
-      setMerchants(listed.merchants);
-      setPages(listed.pagination.pages);
+
+      const directoryResponse = directoryData as DirectoryStatus;
+      const detailResponse = detailData as { latestRun: DetailRun | null };
+      const merchantResponse = merchantData as {
+        merchants: Merchant[];
+        pagination: { pages: number };
+      };
+
+      setDirectory(directoryResponse);
+      setRun(detailResponse.latestRun);
+      setMerchants(merchantResponse.merchants);
+      setPages(merchantResponse.pagination.pages);
       setAuthenticated(true);
+      setMessage("");
       sessionStorage.setItem("awin-admin-api-key", apiKey);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Failed to load dashboard");
@@ -126,11 +150,11 @@ export default function DashboardClient() {
     return () => window.clearInterval(timer);
   }, [authenticated, refresh]);
 
-  async function runAction(label: string, callback: () => Promise<unknown>) {
+  async function runAction(label: string, action: () => Promise<unknown>) {
     setBusy(true);
     setMessage("");
     try {
-      await callback();
+      await action();
       setMessage(`${label} successful`);
       await refresh();
     } catch (error) {
@@ -140,7 +164,7 @@ export default function DashboardClient() {
     }
   }
 
-  function login(event: FormEvent) {
+  function login(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     void refresh();
   }
@@ -173,39 +197,28 @@ export default function DashboardClient() {
           <p className="text-sm font-medium text-emerald-400">Awin Commission Rates</p>
           <h1 className="mt-2 text-3xl font-semibold text-white">Admin dashboard</h1>
           <p className="mt-3 text-sm text-zinc-400">Enter the ADMIN_API_KEY configured on the server.</p>
-          <input
-            type="password"
-            value={apiKey}
-            onChange={(event) => setApiKey(event.target.value)}
-            className="mt-6 w-full rounded-lg border border-zinc-700 bg-zinc-900 px-4 py-3 text-white outline-none focus:border-emerald-500"
-            placeholder="Admin API key"
-            autoComplete="current-password"
-          />
-          <button className="mt-4 w-full rounded-lg bg-emerald-500 px-4 py-3 font-semibold text-zinc-950 hover:bg-emerald-400">
-            Open dashboard
-          </button>
+          <input type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} className="mt-6 w-full rounded-lg border border-zinc-700 bg-zinc-900 px-4 py-3 text-white outline-none focus:border-emerald-500" placeholder="Admin API key" autoComplete="current-password" />
+          <button className="mt-4 w-full rounded-lg bg-emerald-500 px-4 py-3 font-semibold text-zinc-950 hover:bg-emerald-400">Open dashboard</button>
           {message && <p className="mt-4 text-sm text-red-400">{message}</p>}
         </form>
       </main>
     );
   }
 
-  const run = details?.latestRun;
-
   return (
     <main className="mx-auto min-h-screen max-w-7xl px-5 py-8">
-      <div className="flex flex-wrap items-center justify-between gap-4">
+      <header className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <p className="text-sm font-medium text-emerald-500">Awin Commission Rates</p>
           <h1 className="text-3xl font-semibold text-zinc-100">Merchant synchronization</h1>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button disabled={busy} onClick={() => void runAction("Directory import", () => api("/api/awin/import-programmes", { method: "POST", body: JSON.stringify({ includeHidden: true }) }))} className="btn-secondary">Import directory</button>
-          <button disabled={busy} onClick={() => void runAction("Missing detail sync", () => api("/api/awin/detail-sync/start", { method: "POST", body: JSON.stringify({ mode: "missing" }) }))} className="btn-primary">Sync missing details</button>
-          <button disabled={busy} onClick={() => void runAction("Stale detail sync", () => api("/api/awin/detail-sync/start", { method: "POST", body: JSON.stringify({ mode: "stale", staleAfterDays: 30 }) }))} className="btn-secondary">Refresh stale</button>
-          <button disabled={busy} onClick={() => void exportCsv()} className="btn-secondary">Export CSV</button>
+          <button disabled={busy} className="btn-secondary" onClick={() => void runAction("Directory import", () => api("/api/awin/import-programmes", { method: "POST", body: JSON.stringify({ includeHidden: true }) }))}>Import directory</button>
+          <button disabled={busy} className="btn-primary" onClick={() => void runAction("Missing detail sync", () => api("/api/awin/detail-sync/start", { method: "POST", body: JSON.stringify({ mode: "missing" }) }))}>Sync missing details</button>
+          <button disabled={busy} className="btn-secondary" onClick={() => void runAction("Stale detail sync", () => api("/api/awin/detail-sync/start", { method: "POST", body: JSON.stringify({ mode: "stale", staleAfterDays: 30 }) }))}>Refresh stale</button>
+          <button disabled={busy} className="btn-secondary" onClick={() => void exportCsv()}>Export CSV</button>
         </div>
-      </div>
+      </header>
 
       {message && <div className="mt-5 rounded-lg border border-zinc-700 bg-zinc-900 px-4 py-3 text-sm text-zinc-200">{message}</div>}
 
@@ -225,26 +238,19 @@ export default function DashboardClient() {
           {run && ["pending", "running", "paused"].includes(run.status) && (
             <div className="flex gap-2">
               {run.status === "paused" ? (
-                <button disabled={busy} onClick={() => void runAction("Resume", () => api("/api/awin/detail-sync/control", { method: "POST", body: JSON.stringify({ action: "resume", runId: run.id }) }))} className="btn-primary">Resume</button>
+                <button disabled={busy} className="btn-primary" onClick={() => void runAction("Resume", () => api("/api/awin/detail-sync/control", { method: "POST", body: JSON.stringify({ action: "resume", runId: run.id }) }))}>Resume</button>
               ) : (
-                <button disabled={busy} onClick={() => void runAction("Pause", () => api("/api/awin/detail-sync/control", { method: "POST", body: JSON.stringify({ action: "pause", runId: run.id }) }))} className="btn-secondary">Pause</button>
+                <button disabled={busy} className="btn-secondary" onClick={() => void runAction("Pause", () => api("/api/awin/detail-sync/control", { method: "POST", body: JSON.stringify({ action: "pause", runId: run.id }) }))}>Pause</button>
               )}
-              <button disabled={busy} onClick={() => void runAction("Cancel", () => api("/api/awin/detail-sync/control", { method: "POST", body: JSON.stringify({ action: "cancel", runId: run.id }) }))} className="btn-danger">Cancel</button>
+              <button disabled={busy} className="btn-danger" onClick={() => void runAction("Cancel", () => api("/api/awin/detail-sync/control", { method: "POST", body: JSON.stringify({ action: "cancel", runId: run.id }) }))}>Cancel</button>
             </div>
           )}
         </div>
         {run && (
           <>
-            <div className="mt-5 h-3 overflow-hidden rounded-full bg-zinc-800">
-              <div className="h-full rounded-full bg-emerald-500 transition-all" style={{ width: `${Math.min(100, run.progressPercentage)}%` }} />
-            </div>
+            <div className="mt-5 h-3 overflow-hidden rounded-full bg-zinc-800"><div className="h-full rounded-full bg-emerald-500 transition-all" style={{ width: `${Math.min(100, run.progressPercentage)}%` }} /></div>
             <div className="mt-3 grid gap-3 text-sm text-zinc-400 sm:grid-cols-3 lg:grid-cols-6">
-              <span>{run.processedCount}/{run.totalQueued} processed</span>
-              <span>{run.successCount} successful</span>
-              <span>{run.failedCount} failed</span>
-              <span>{run.retryCount} retries</span>
-              <span>{run.rateLimitCount} rate limits</span>
-              <span>ETA {duration(run.estimatedSeconds)}</span>
+              <span>{run.processedCount}/{run.totalQueued} processed</span><span>{run.successCount} successful</span><span>{run.failedCount} failed</span><span>{run.retryCount} retries</span><span>{run.rateLimitCount} rate limits</span><span>ETA {duration(run.estimatedSeconds)}</span>
             </div>
           </>
         )}
@@ -252,28 +258,22 @@ export default function DashboardClient() {
 
       <section className="mt-6 overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-950">
         <div className="flex flex-wrap gap-3 border-b border-zinc-800 p-4">
-          <form onSubmit={(event) => { event.preventDefault(); setPage(1); void refresh(); }} className="flex min-w-64 flex-1 gap-2">
-            <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search merchant or advertiser ID" className="input" />
+          <form className="flex min-w-64 flex-1 gap-2" onSubmit={(event) => { event.preventDefault(); setPage(1); void refresh(); }}>
+            <input className="input flex-1" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search merchant or advertiser ID" />
             <button className="btn-secondary">Search</button>
           </form>
-          <select value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value); setPage(1); }} className="input max-w-48">
-            <option value="">All detail statuses</option>
-            <option value="pending">Pending</option>
-            <option value="processing">Processing</option>
-            <option value="completed">Completed</option>
-            <option value="failed">Failed</option>
+          <select className="input max-w-48" value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value); setPage(1); }}>
+            <option value="">All detail statuses</option><option value="pending">Pending</option><option value="processing">Processing</option><option value="completed">Completed</option><option value="failed">Failed</option>
           </select>
         </div>
         <div className="overflow-x-auto">
           <table className="min-w-full text-left text-sm">
-            <thead className="bg-zinc-900 text-zinc-400">
-              <tr><th className="table-cell">ID</th><th className="table-cell">Programme</th><th className="table-cell">Country</th><th className="table-cell">Relationship</th><th className="table-cell">Commission</th><th className="table-cell">Sync</th><th className="table-cell">Updated</th></tr>
-            </thead>
+            <thead className="bg-zinc-900 text-zinc-400"><tr><th className="table-cell">ID</th><th className="table-cell">Programme</th><th className="table-cell">Country</th><th className="table-cell">Relationship</th><th className="table-cell">Commission</th><th className="table-cell">Sync</th><th className="table-cell">Updated</th></tr></thead>
             <tbody className="divide-y divide-zinc-800">
               {merchants.map((merchant) => (
                 <tr key={merchant.id} className="text-zinc-300">
                   <td className="table-cell font-mono">{merchant.advertiserId}</td>
-                  <td className="table-cell"><div className="font-medium text-white">{merchant.programmeName ?? "Unnamed"}</div><div className="max-w-xs truncate text-xs text-red-400">{merchant.lastSyncError}</div></td>
+                  <td className="table-cell"><div className="font-medium text-white">{merchant.programmeName ?? "Unnamed"}</div>{merchant.lastSyncError && <div className="max-w-xs truncate text-xs text-red-400">{merchant.lastSyncError}</div>}</td>
                   <td className="table-cell">{merchant.countryCode ?? "—"}</td>
                   <td className="table-cell">{merchant.membershipStatus ?? "—"}</td>
                   <td className="table-cell">{merchant.commissionMin !== undefined ? `${merchant.commissionMin}–${merchant.commissionMax ?? merchant.commissionMin} ${merchant.commissionType ?? ""}` : "—"}</td>
@@ -287,7 +287,7 @@ export default function DashboardClient() {
         </div>
         <div className="flex items-center justify-between border-t border-zinc-800 p-4 text-sm text-zinc-400">
           <span>Page {page} of {pages}</span>
-          <div className="flex gap-2"><button disabled={page <= 1} onClick={() => setPage((value) => value - 1)} className="btn-secondary">Previous</button><button disabled={page >= pages} onClick={() => setPage((value) => value + 1)} className="btn-secondary">Next</button></div>
+          <div className="flex gap-2"><button disabled={page <= 1} className="btn-secondary" onClick={() => setPage((value) => value - 1)}>Previous</button><button disabled={page >= pages} className="btn-secondary" onClick={() => setPage((value) => value + 1)}>Next</button></div>
         </div>
       </section>
     </main>
