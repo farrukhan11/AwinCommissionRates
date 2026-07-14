@@ -64,7 +64,7 @@ describe("normalizeAwinProgramDetails", () => {
     assert.equal(result.detailFetchVersion, AWIN_DETAIL_FETCH_VERSION);
     assert.equal(
       result.detailFetchStrategy,
-      "programmedetails-relationship-any",
+      "programmedetails-default-then-any-fallback",
     );
   });
 
