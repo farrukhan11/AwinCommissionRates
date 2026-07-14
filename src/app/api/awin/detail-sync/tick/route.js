@@ -31,6 +31,17 @@ function retryDelaySeconds(attempts) {
   return Math.min(15 * 60, 15 * 2 ** Math.max(0, attempts - 1));
 }
 
+function membershipKey(value) {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_-]+/g, "");
+}
+
+function isJoinedMerchant(merchant) {
+  return membershipKey(merchant?.membershipStatus) === "joined";
+}
+
 async function acquireRun(processorId) {
   const now = new Date();
   const run = await AwinDetailSyncRun.findOneAndUpdate(
@@ -110,6 +121,7 @@ async function failExhaustedMerchants(runId, maxAttempts) {
     {
       $set: {
         syncStatus: "failed",
+        commissionFetchStatus: "failed",
         lastSyncError: "Maximum detail sync attempts reached",
       },
       $unset: { detailSyncLockedAt: "", nextRetryAt: "" },
@@ -120,22 +132,10 @@ async function failExhaustedMerchants(runId, maxAttempts) {
 async function finalizeRun(runId) {
   const [successCount, failedCount, pendingCount, processingCount] =
     await Promise.all([
-      AwinMerchant.countDocuments({
-        detailSyncRunId: runId,
-        syncStatus: "completed",
-      }),
-      AwinMerchant.countDocuments({
-        detailSyncRunId: runId,
-        syncStatus: "failed",
-      }),
-      AwinMerchant.countDocuments({
-        detailSyncRunId: runId,
-        syncStatus: "pending",
-      }),
-      AwinMerchant.countDocuments({
-        detailSyncRunId: runId,
-        syncStatus: "processing",
-      }),
+      AwinMerchant.countDocuments({ detailSyncRunId: runId, syncStatus: "completed" }),
+      AwinMerchant.countDocuments({ detailSyncRunId: runId, syncStatus: "failed" }),
+      AwinMerchant.countDocuments({ detailSyncRunId: runId, syncStatus: "pending" }),
+      AwinMerchant.countDocuments({ detailSyncRunId: runId, syncStatus: "processing" }),
     ]);
 
   if (pendingCount > 0 || processingCount > 0) return false;
@@ -172,37 +172,64 @@ async function failRun(runId, code, message) {
   );
 }
 
+function eligibleMerchantFilter(runId, maxAttempts) {
+  const now = new Date();
+  return {
+    detailSyncRunId: runId,
+    syncStatus: "pending",
+    detailRunAttempts: { $lt: maxAttempts },
+    $or: [
+      { nextRetryAt: { $exists: false } },
+      { nextRetryAt: { $lte: now } },
+    ],
+  };
+}
+
+function claimUpdate(now) {
+  return {
+    $set: {
+      syncStatus: "processing",
+      detailSyncLockedAt: now,
+      lastSyncAttemptAt: now,
+    },
+    $inc: { detailRunAttempts: 1, syncAttempts: 1 },
+  };
+}
+
 async function claimMerchant(runId, maxAttempts) {
   const now = new Date();
-  return AwinMerchant.findOneAndUpdate(
+  const baseFilter = eligibleMerchantFilter(runId, maxAttempts);
+
+  // CommissionBag's proven flow fetches joined programmes. Prioritise those so
+  // real commission ranges appear immediately instead of spending hours on
+  // not-joined programmes that normally have no commissionRange.
+  const joined = await AwinMerchant.findOneAndUpdate(
     {
-      detailSyncRunId: runId,
-      syncStatus: "pending",
-      detailRunAttempts: { $lt: maxAttempts },
-      $or: [
-        { nextRetryAt: { $exists: false } },
-        { nextRetryAt: { $lte: now } },
-      ],
+      ...baseFilter,
+      membershipStatus: { $regex: /^joined$/i },
     },
-    {
-      $set: {
-        syncStatus: "processing",
-        detailSyncLockedAt: now,
-        lastSyncAttemptAt: now,
-      },
-      $inc: { detailRunAttempts: 1, syncAttempts: 1 },
-    },
+    claimUpdate(now),
     { new: true, sort: { advertiserId: 1 } },
   );
+
+  if (joined) return joined;
+
+  return AwinMerchant.findOneAndUpdate(baseFilter, claimUpdate(now), {
+    new: true,
+    sort: { advertiserId: 1 },
+  });
 }
 
 async function processMerchant(run, merchant) {
   const advertiserId = merchant.advertiserId;
   const maxAttempts = run.maxAttempts ?? 5;
   const attempts = merchant.detailRunAttempts ?? 1;
+  const joined = isJoinedMerchant(merchant);
 
   try {
-    const rawDetails = await getAwinProgramDetails(advertiserId);
+    const rawDetails = await getAwinProgramDetails(advertiserId, {
+      relationship: joined ? "joined" : "any",
+    });
     const normalized = normalizeAwinProgramDetails(rawDetails);
     const completedAt = new Date();
     const fields = Object.fromEntries(
@@ -234,21 +261,27 @@ async function processMerchant(run, merchant) {
       },
     );
 
-    return { outcome: "completed", advertiserId };
+    return {
+      outcome: normalized.commissionFetchStatus === "fetched" ? "commission_fetched" : "completed",
+      advertiserId,
+      commission: normalized.commissionDisplay,
+    };
   } catch (error) {
     const awinError =
       error instanceof AwinApiError
         ? error
         : new AwinApiError(500, "TICK_ERROR", "Unexpected sync error");
-    const fatal = ["AWIN_UNAUTHORIZED", "AWIN_FORBIDDEN"].includes(
-      awinError.code,
-    );
+    const fatal = ["AWIN_UNAUTHORIZED", "AWIN_FORBIDDEN"].includes(awinError.code);
 
     if (fatal) {
       await AwinMerchant.updateOne(
         { _id: merchant._id },
         {
-          $set: { syncStatus: "failed", lastSyncError: awinError.message },
+          $set: {
+            syncStatus: "failed",
+            commissionFetchStatus: "failed",
+            lastSyncError: awinError.message,
+          },
           $unset: { detailSyncLockedAt: "" },
         },
       );
@@ -274,11 +307,7 @@ async function processMerchant(run, merchant) {
         { _id: run._id },
         { $inc: { rateLimitCount: 1, retryCount: 1 } },
       );
-      return {
-        outcome: "rate_limited",
-        advertiserId,
-        retryAfterSeconds: retrySeconds,
-      };
+      return { outcome: "rate_limited", advertiserId, retryAfterSeconds: retrySeconds };
     }
 
     if (attempts < maxAttempts && awinError.code !== "AWIN_NOT_FOUND") {
@@ -304,7 +333,11 @@ async function processMerchant(run, merchant) {
     await AwinMerchant.updateOne(
       { _id: merchant._id },
       {
-        $set: { syncStatus: "failed", lastSyncError: awinError.message },
+        $set: {
+          syncStatus: "failed",
+          commissionFetchStatus: "failed",
+          lastSyncError: awinError.message,
+        },
         $unset: { detailSyncLockedAt: "", nextRetryAt: "" },
       },
     );
@@ -322,10 +355,7 @@ async function processMerchant(run, merchant) {
 export async function POST(request) {
   if (!isValidAdminApiKey(request.headers.get("x-admin-api-key"))) {
     return NextResponse.json(
-      {
-        success: false,
-        error: { code: "UNAUTHORIZED", message: "Invalid or missing API key" },
-      },
+      { success: false, error: { code: "UNAUTHORIZED", message: "Invalid or missing API key" } },
       { status: 401 },
     );
   }
