@@ -1,6 +1,8 @@
 # Awin Commission Rates
 
-Production-ready Next.js and MongoDB system for importing the complete Awin programme directory and synchronizing each advertiser's programme details and commission range.
+Production-ready JavaScript/JSX Next.js and MongoDB system for importing the complete Awin programme directory and synchronizing each advertiser's programme details and commission range.
+
+The application source uses `.js` and `.jsx` files with `jsconfig.json` path aliases. There is no TypeScript source or `tsconfig.json`.
 
 ## What is implemented
 
@@ -220,14 +222,13 @@ All Awin administration routes require the `x-admin-api-key` header. The health 
 
 ```bash
 npm test
-npm run typecheck
 npm run lint
 npm run build
 node --check scripts/awin-detail-worker.mjs
 node --check scripts/awin-scheduler.mjs
 ```
 
-GitHub Actions runs tests, type checking, linting, and production build for pushes and pull requests.
+GitHub Actions runs JavaScript tests, linting, worker syntax checks, and the production build for pushes and pull requests.
 
 ## Operational behavior
 
