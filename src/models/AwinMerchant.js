@@ -15,6 +15,8 @@ const AwinMerchantSchema = new Schema(
     kpi: Schema.Types.Mixed,
     programmeInfo: Schema.Types.Mixed,
     detailsFetchedAt: Date,
+    detailFetchVersion: Number,
+    detailFetchStrategy: String,
     syncStatus: {
       type: String,
       enum: ["pending", "processing", "completed", "failed"],
