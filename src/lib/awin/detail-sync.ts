@@ -1,6 +1,6 @@
-import type { FilterQuery, HydratedDocument } from "mongoose";
+import type { HydratedDocument } from "mongoose";
 
-import AwinMerchant, { type IAwinMerchant } from "@/models/AwinMerchant";
+import AwinMerchant from "@/models/AwinMerchant";
 import AwinDetailSyncRun, {
   type DetailSyncMode,
   type IAwinDetailSyncRun,
@@ -13,6 +13,13 @@ export interface StartDetailSyncInput {
   requestDelayMs?: number;
   advertiserIds?: number[];
 }
+
+type MerchantQueueFilter = {
+  directoryImportStatus: "active";
+  advertiserId?: { $in: number[] };
+  syncStatus?: "failed";
+  $or?: Array<Record<string, unknown>>;
+};
 
 export class DetailSyncConflictError extends Error {
   constructor() {
@@ -36,7 +43,10 @@ function normalizeAdvertiserIds(value: unknown): number[] | undefined {
 }
 
 export function parseStartDetailSyncInput(raw: unknown): Required<
-  Pick<StartDetailSyncInput, "mode" | "staleAfterDays" | "maxAttempts" | "requestDelayMs">
+  Pick<
+    StartDetailSyncInput,
+    "mode" | "staleAfterDays" | "maxAttempts" | "requestDelayMs"
+  >
 > & { advertiserIds?: number[] } {
   const record =
     typeof raw === "object" && raw !== null && !Array.isArray(raw)
@@ -69,8 +79,10 @@ export function parseStartDetailSyncInput(raw: unknown): Required<
   };
 }
 
-function buildMerchantFilter(input: ReturnType<typeof parseStartDetailSyncInput>) {
-  const filter: FilterQuery<IAwinMerchant> = { directoryImportStatus: "active" };
+function buildMerchantFilter(
+  input: ReturnType<typeof parseStartDetailSyncInput>,
+): MerchantQueueFilter {
+  const filter: MerchantQueueFilter = { directoryImportStatus: "active" };
 
   if (input.mode === "selected") {
     filter.advertiserId = { $in: input.advertiserIds ?? [] };
