@@ -1,0 +1,24 @@
+name: JavaScript Source Guard
+
+on:
+  push:
+    branches: [master, "agent/**"]
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  ensure-javascript-source:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reject TypeScript source files
+        shell: bash
+        run: |
+          if find src -type f \( -name '*.ts' -o -name '*.tsx' \) | grep -q .; then
+            echo "TypeScript source files found:"
+            find src -type f \( -name '*.ts' -o -name '*.tsx' \)
+            exit 1
+          fi
