@@ -1,4 +1,4 @@
-import type { FilterQuery } from "mongoose";
+import type { FilterQuery, HydratedDocument } from "mongoose";
 
 import AwinMerchant, { type IAwinMerchant } from "@/models/AwinMerchant";
 import AwinDetailSyncRun, {
@@ -28,12 +28,10 @@ function clampInteger(value: unknown, fallback: number, min: number, max: number
 
 function normalizeAdvertiserIds(value: unknown): number[] | undefined {
   if (!Array.isArray(value)) return undefined;
-
   const ids = value.filter(
     (item): item is number =>
       typeof item === "number" && Number.isInteger(item) && item > 0,
   );
-
   return [...new Set(ids)].slice(0, 1000);
 }
 
@@ -72,9 +70,7 @@ export function parseStartDetailSyncInput(raw: unknown): Required<
 }
 
 function buildMerchantFilter(input: ReturnType<typeof parseStartDetailSyncInput>) {
-  const filter: FilterQuery<IAwinMerchant> = {
-    directoryImportStatus: "active",
-  };
+  const filter: FilterQuery<IAwinMerchant> = { directoryImportStatus: "active" };
 
   if (input.mode === "selected") {
     filter.advertiserId = { $in: input.advertiserIds ?? [] };
@@ -109,8 +105,8 @@ function isDuplicateKeyError(error: unknown): boolean {
 
 export async function startDetailSyncRun(
   input: ReturnType<typeof parseStartDetailSyncInput>,
-): Promise<IAwinDetailSyncRun> {
-  let run: IAwinDetailSyncRun & { _id: unknown };
+): Promise<HydratedDocument<IAwinDetailSyncRun>> {
+  let run: HydratedDocument<IAwinDetailSyncRun>;
 
   try {
     run = await AwinDetailSyncRun.create({
@@ -144,14 +140,13 @@ export async function startDetailSyncRun(
     });
 
     run.totalQueued = result.matchedCount;
-
     if (result.matchedCount === 0) {
       run.status = "completed";
       run.completedAt = now;
-      run.activeLock = undefined;
+      run.set("activeLock", undefined);
     }
 
-    await (run as unknown as { save(): Promise<unknown> }).save();
+    await run.save();
     return run;
   } catch (error) {
     await AwinDetailSyncRun.findByIdAndUpdate(run._id, {
