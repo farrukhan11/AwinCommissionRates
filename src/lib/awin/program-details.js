@@ -1,35 +1,19 @@
-export interface NormalizedProgramDetails {
-  programmeDetails: unknown;
-  commissionRange?: unknown;
-  kpi?: unknown;
-  programmeInfo?: unknown;
-  programmeName?: string;
-  membershipStatus?: string;
-  displayUrl?: string;
-  logoUrl?: string;
-  currencyCode?: string;
-  primaryRegion?: string;
-  countryCode?: string;
-  sector?: string;
-  commissionMin?: number;
-  commissionMax?: number;
-  commissionType?: string;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
+function isRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function readString(value: unknown): string | undefined {
+function readString(value) {
   return typeof value === "string" && value.trim() !== "" ? value : undefined;
 }
 
-function readFiniteNumber(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+function readFiniteNumber(value) {
+  return typeof value === "number" && Number.isFinite(value)
+    ? value
+    : undefined;
 }
 
-export function normalizeAwinProgramDetails(raw: unknown): NormalizedProgramDetails {
-  const normalized: NormalizedProgramDetails = { programmeDetails: raw };
+export function normalizeAwinProgramDetails(raw) {
+  const normalized = { programmeDetails: raw };
 
   if (!isRecord(raw)) {
     return normalized;
@@ -58,17 +42,19 @@ export function normalizeAwinProgramDetails(raw: unknown): NormalizedProgramDeta
     const ranges = raw.commissionRange.filter(isRecord);
     const mins = ranges
       .map((range) => readFiniteNumber(range.min))
-      .filter((value): value is number => value !== undefined);
+      .filter((value) => value !== undefined);
     const maxes = ranges
       .map((range) => readFiniteNumber(range.max))
-      .filter((value): value is number => value !== undefined);
+      .filter((value) => value !== undefined);
     const types = ranges
       .map((range) => readString(range.type))
-      .filter((value): value is string => value !== undefined);
+      .filter((value) => value !== undefined);
 
     if (mins.length > 0) normalized.commissionMin = Math.min(...mins);
     if (maxes.length > 0) normalized.commissionMax = Math.max(...maxes);
-    if (types.length > 0) normalized.commissionType = [...new Set(types)].join(",");
+    if (types.length > 0) {
+      normalized.commissionType = [...new Set(types)].join(",");
+    }
   }
 
   return normalized;

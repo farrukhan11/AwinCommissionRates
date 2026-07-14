@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 
 import { isValidAdminApiKey } from "@/lib/auth/admin-api-key";
 import {
@@ -10,21 +10,27 @@ import { connectToDatabase } from "@/lib/mongodb";
 
 export const runtime = "nodejs";
 
-export async function POST(request: NextRequest) {
+export async function POST(request) {
   if (!isValidAdminApiKey(request.headers.get("x-admin-api-key"))) {
     return NextResponse.json(
-      { success: false, error: { code: "UNAUTHORIZED", message: "Invalid or missing API key" } },
+      {
+        success: false,
+        error: { code: "UNAUTHORIZED", message: "Invalid or missing API key" },
+      },
       { status: 401 },
     );
   }
 
-  let body: unknown = {};
+  let body = {};
   try {
     const text = await request.text();
-    if (text.trim()) body = JSON.parse(text) as unknown;
+    if (text.trim()) body = JSON.parse(text);
   } catch {
     return NextResponse.json(
-      { success: false, error: { code: "INVALID_REQUEST", message: "Invalid JSON body" } },
+      {
+        success: false,
+        error: { code: "INVALID_REQUEST", message: "Invalid JSON body" },
+      },
       { status: 400 },
     );
   }
@@ -36,7 +42,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      runId: String((run as unknown as { _id: unknown })._id),
+      runId: String(run._id),
       status: run.status,
       mode: run.mode,
       totalQueued: run.totalQueued,
@@ -62,7 +68,10 @@ export async function POST(request: NextRequest) {
 
     if (error instanceof Error && error.message.includes("advertiserIds")) {
       return NextResponse.json(
-        { success: false, error: { code: "INVALID_REQUEST", message: error.message } },
+        {
+          success: false,
+          error: { code: "INVALID_REQUEST", message: error.message },
+        },
         { status: 400 },
       );
     }

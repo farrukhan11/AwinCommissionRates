@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 
 import { isValidAdminApiKey } from "@/lib/auth/admin-api-key";
 import { getAwinProgramDetails } from "@/lib/awin/client";
@@ -9,32 +9,48 @@ import AwinMerchant from "@/models/AwinMerchant";
 
 export const runtime = "nodejs";
 
-function isRecord(value: unknown): value is Record<string, unknown> {
+function isRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-export async function POST(request: NextRequest) {
+export async function POST(request) {
   if (!isValidAdminApiKey(request.headers.get("x-admin-api-key"))) {
     return NextResponse.json(
-      { success: false, error: { code: "UNAUTHORIZED", message: "Invalid or missing API key" } },
+      {
+        success: false,
+        error: { code: "UNAUTHORIZED", message: "Invalid or missing API key" },
+      },
       { status: 401 },
     );
   }
 
-  let body: unknown;
+  let body;
   try {
     body = await request.json();
   } catch {
     return NextResponse.json(
-      { success: false, error: { code: "INVALID_REQUEST", message: "Invalid JSON body" } },
+      {
+        success: false,
+        error: { code: "INVALID_REQUEST", message: "Invalid JSON body" },
+      },
       { status: 400 },
     );
   }
 
   const advertiserId = isRecord(body) ? body.advertiserId : undefined;
-  if (typeof advertiserId !== "number" || !Number.isInteger(advertiserId) || advertiserId <= 0) {
+  if (
+    typeof advertiserId !== "number" ||
+    !Number.isInteger(advertiserId) ||
+    advertiserId <= 0
+  ) {
     return NextResponse.json(
-      { success: false, error: { code: "INVALID_REQUEST", message: "advertiserId must be a positive integer" } },
+      {
+        success: false,
+        error: {
+          code: "INVALID_REQUEST",
+          message: "advertiserId must be a positive integer",
+        },
+      },
       { status: 400 },
     );
   }
@@ -43,7 +59,13 @@ export async function POST(request: NextRequest) {
     await connectToDatabase();
   } catch {
     return NextResponse.json(
-      { success: false, error: { code: "DATABASE_ERROR", message: "Failed to connect to database" } },
+      {
+        success: false,
+        error: {
+          code: "DATABASE_ERROR",
+          message: "Failed to connect to database",
+        },
+      },
       { status: 500 },
     );
   }
@@ -81,7 +103,8 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ success: true, advertiserId, saved: true, data });
   } catch (error) {
-    const message = error instanceof AwinApiError ? error.message : "Failed to sync advertiser";
+    const message =
+      error instanceof AwinApiError ? error.message : "Failed to sync advertiser";
     await AwinMerchant.updateOne(
       { advertiserId },
       { $set: { syncStatus: "failed", lastSyncError: message } },
@@ -104,7 +127,10 @@ export async function POST(request: NextRequest) {
     }
 
     return NextResponse.json(
-      { success: false, error: { code: "INTERNAL_ERROR", message: "Failed to sync advertiser" } },
+      {
+        success: false,
+        error: { code: "INTERNAL_ERROR", message: "Failed to sync advertiser" },
+      },
       { status: 500 },
     );
   }

@@ -1,31 +1,8 @@
-import type { AnyBulkWriteOperation } from "mongoose";
-
-import type { IAwinMerchant } from "@/models/AwinMerchant";
-
-export interface NormalizedAwinProgramme {
-  advertiserId: number;
-  programmeName?: string;
-  membershipStatus?: string;
-  programmeStatus?: string;
-  primaryRegion?: string;
-  countryCode?: string;
-  currencyCode?: string;
-  sector?: string;
-  displayUrl?: string;
-  logoUrl?: string;
-  isHidden?: boolean;
-  basicProgrammeInfo: unknown;
-}
-
-export type NormalizeAwinProgrammeResult =
-  | { valid: true; programme: NormalizedAwinProgramme }
-  | { valid: false; reason: string };
-
-function isRecord(value: unknown): value is Record<string, unknown> {
+function isRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function toPositiveInteger(value: unknown): number | undefined {
+function toPositiveInteger(value) {
   if (typeof value === "number" && Number.isInteger(value) && value > 0) {
     return value;
   }
@@ -38,15 +15,17 @@ function toPositiveInteger(value: unknown): number | undefined {
   return undefined;
 }
 
-function readString(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim() !== "" ? value.trim() : undefined;
+function readString(value) {
+  return typeof value === "string" && value.trim() !== ""
+    ? value.trim()
+    : undefined;
 }
 
-function readBoolean(value: unknown): boolean | undefined {
+function readBoolean(value) {
   return typeof value === "boolean" ? value : undefined;
 }
 
-function getFirstValue(record: Record<string, unknown>, keys: string[]): unknown {
+function getFirstValue(record, keys) {
   for (const key of keys) {
     const value = record[key];
     if (value !== undefined && value !== null) return value;
@@ -54,17 +33,21 @@ function getFirstValue(record: Record<string, unknown>, keys: string[]): unknown
   return undefined;
 }
 
-function extractAdvertiserId(record: Record<string, unknown>): number | undefined {
-  const directId = toPositiveInteger(getFirstValue(record, ["id", "advertiserId"]));
+function extractAdvertiserId(record) {
+  const directId = toPositiveInteger(
+    getFirstValue(record, ["id", "advertiserId"]),
+  );
   if (directId !== undefined) return directId;
 
   const nestedAdvertiser = record.advertiser;
   return isRecord(nestedAdvertiser)
-    ? toPositiveInteger(getFirstValue(nestedAdvertiser, ["id", "advertiserId"]))
+    ? toPositiveInteger(
+        getFirstValue(nestedAdvertiser, ["id", "advertiserId"]),
+      )
     : undefined;
 }
 
-export function normalizeAwinProgramme(rawProgramme: unknown): NormalizeAwinProgrammeResult {
+export function normalizeAwinProgramme(rawProgramme) {
   if (!isRecord(rawProgramme)) {
     return { valid: false, reason: "Programme record is not an object" };
   }
@@ -74,28 +57,25 @@ export function normalizeAwinProgramme(rawProgramme: unknown): NormalizeAwinProg
     return { valid: false, reason: "Missing or invalid advertiser ID" };
   }
 
-  const programme: NormalizedAwinProgramme = {
+  const programme = {
     advertiserId,
     basicProgrammeInfo: rawProgramme,
   };
 
-  const stringMappings: Array<[
-    keyof Pick<
-      NormalizedAwinProgramme,
-      | "programmeName"
-      | "membershipStatus"
-      | "programmeStatus"
-      | "currencyCode"
-      | "sector"
-      | "displayUrl"
-      | "logoUrl"
-    >,
-    unknown,
-  ]> = [
+  const stringMappings = [
     ["programmeName", getFirstValue(rawProgramme, ["name", "programmeName"])],
-    ["membershipStatus", getFirstValue(rawProgramme, ["membershipStatus", "relationship"])],
-    ["programmeStatus", getFirstValue(rawProgramme, ["status", "programmeStatus"])],
-    ["currencyCode", getFirstValue(rawProgramme, ["currencyCode", "currency"])],
+    [
+      "membershipStatus",
+      getFirstValue(rawProgramme, ["membershipStatus", "relationship"]),
+    ],
+    [
+      "programmeStatus",
+      getFirstValue(rawProgramme, ["status", "programmeStatus"]),
+    ],
+    [
+      "currencyCode",
+      getFirstValue(rawProgramme, ["currencyCode", "currency"]),
+    ],
     ["sector", getFirstValue(rawProgramme, ["primarySector", "sector"])],
     ["displayUrl", getFirstValue(rawProgramme, ["displayUrl", "url"])],
     ["logoUrl", getFirstValue(rawProgramme, ["logoUrl", "logo"])],
@@ -118,7 +98,9 @@ export function normalizeAwinProgramme(rawProgramme: unknown): NormalizeAwinProg
   }
 
   if (!programme.countryCode) {
-    const countryCode = readString(getFirstValue(rawProgramme, ["countryCode", "country"]));
+    const countryCode = readString(
+      getFirstValue(rawProgramme, ["countryCode", "country"]),
+    );
     if (countryCode) programme.countryCode = countryCode;
   }
 
@@ -132,28 +114,23 @@ export function normalizeAwinProgramme(rawProgramme: unknown): NormalizeAwinProg
   return { valid: true, programme };
 }
 
-export function deduplicateProgrammes(
-  programmes: NormalizedAwinProgramme[],
-): NormalizedAwinProgramme[] {
-  const programmesByAdvertiserId = new Map<number, NormalizedAwinProgramme>();
+export function deduplicateProgrammes(programmes) {
+  const programmesByAdvertiserId = new Map();
   for (const programme of programmes) {
     programmesByAdvertiserId.set(programme.advertiserId, programme);
   }
   return Array.from(programmesByAdvertiserId.values());
 }
 
-export function buildMerchantBulkOperation(
-  programme: NormalizedAwinProgramme,
-  importStartedAt: Date,
-): AnyBulkWriteOperation<IAwinMerchant> {
-  const setFields: Partial<IAwinMerchant> = {
+export function buildMerchantBulkOperation(programme, importStartedAt) {
+  const setFields = {
     basicProgrammeInfo: programme.basicProgrammeInfo,
     programmeListFetchedAt: importStartedAt,
     lastSeenInProgrammeListAt: importStartedAt,
     directoryImportStatus: "active",
   };
 
-  const optionalFields: Array<keyof NormalizedAwinProgramme> = [
+  const optionalFields = [
     "programmeName",
     "membershipStatus",
     "programmeStatus",
@@ -169,7 +146,7 @@ export function buildMerchantBulkOperation(
   for (const key of optionalFields) {
     const value = programme[key];
     if (value !== undefined) {
-      (setFields as Record<string, unknown>)[key] = value;
+      setFields[key] = value;
     }
   }
 
@@ -179,7 +156,7 @@ export function buildMerchantBulkOperation(
       update: {
         $set: setFields,
         $setOnInsert: {
-          syncStatus: "pending" as const,
+          syncStatus: "pending",
           syncAttempts: 0,
           detailRunAttempts: 0,
         },

@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 
 import { isValidAdminApiKey } from "@/lib/auth/admin-api-key";
 import { connectToDatabase } from "@/lib/mongodb";
@@ -20,7 +20,7 @@ function unauthorizedResponse() {
   );
 }
 
-export async function GET(request: NextRequest) {
+export async function GET(request) {
   if (!isValidAdminApiKey(request.headers.get("x-admin-api-key"))) {
     return unauthorizedResponse();
   }

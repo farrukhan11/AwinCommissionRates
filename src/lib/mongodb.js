@@ -1,26 +1,13 @@
 import mongoose from "mongoose";
 
-interface MongooseCache {
-  conn: typeof mongoose | null;
-  promise: Promise<typeof mongoose> | null;
-}
-
-declare global {
-  interface Global {
-    mongooseCache?: MongooseCache;
-  }
-}
-
-const globalForMongoose = globalThis as typeof globalThis & Global;
-
-const cached: MongooseCache = globalForMongoose.mongooseCache ?? {
+const cached = globalThis.mongooseCache ?? {
   conn: null,
   promise: null,
 };
 
-globalForMongoose.mongooseCache = cached;
+globalThis.mongooseCache = cached;
 
-export async function connectToDatabase(): Promise<typeof mongoose> {
+export async function connectToDatabase() {
   const mongodbUri = process.env.MONGODB_URI;
 
   if (!mongodbUri) {

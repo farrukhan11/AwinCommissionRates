@@ -4,7 +4,7 @@ import { describe, it } from "node:test";
 import {
   deduplicateProgrammes,
   normalizeAwinProgramme,
-} from "./normalizers.ts";
+} from "./normalizers.js";
 
 describe("normalizeAwinProgramme", () => {
   it("accepts a valid programme with id", () => {

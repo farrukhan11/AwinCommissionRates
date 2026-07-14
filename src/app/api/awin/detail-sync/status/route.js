@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 
 import { isValidAdminApiKey } from "@/lib/auth/admin-api-key";
 import { connectToDatabase } from "@/lib/mongodb";
@@ -7,10 +7,13 @@ import AwinDetailSyncRun from "@/models/AwinDetailSyncRun";
 
 export const runtime = "nodejs";
 
-export async function GET(request: NextRequest) {
+export async function GET(request) {
   if (!isValidAdminApiKey(request.headers.get("x-admin-api-key"))) {
     return NextResponse.json(
-      { success: false, error: { code: "UNAUTHORIZED", message: "Invalid or missing API key" } },
+      {
+        success: false,
+        error: { code: "UNAUTHORIZED", message: "Invalid or missing API key" },
+      },
       { status: 401 },
     );
   }
@@ -25,10 +28,22 @@ export async function GET(request: NextRequest) {
     }
 
     const [pending, processing, completed, failed] = await Promise.all([
-      AwinMerchant.countDocuments({ detailSyncRunId: run._id, syncStatus: "pending" }),
-      AwinMerchant.countDocuments({ detailSyncRunId: run._id, syncStatus: "processing" }),
-      AwinMerchant.countDocuments({ detailSyncRunId: run._id, syncStatus: "completed" }),
-      AwinMerchant.countDocuments({ detailSyncRunId: run._id, syncStatus: "failed" }),
+      AwinMerchant.countDocuments({
+        detailSyncRunId: run._id,
+        syncStatus: "pending",
+      }),
+      AwinMerchant.countDocuments({
+        detailSyncRunId: run._id,
+        syncStatus: "processing",
+      }),
+      AwinMerchant.countDocuments({
+        detailSyncRunId: run._id,
+        syncStatus: "completed",
+      }),
+      AwinMerchant.countDocuments({
+        detailSyncRunId: run._id,
+        syncStatus: "failed",
+      }),
     ]);
 
     const remaining = Math.max(0, pending + processing);
@@ -67,7 +82,10 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(
       {
         success: false,
-        error: { code: "DETAIL_SYNC_STATUS_FAILED", message: "Failed to read detail sync status" },
+        error: {
+          code: "DETAIL_SYNC_STATUS_FAILED",
+          message: "Failed to read detail sync status",
+        },
       },
       { status: 500 },
     );

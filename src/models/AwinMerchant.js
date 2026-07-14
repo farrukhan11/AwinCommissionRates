@@ -1,47 +1,6 @@
-import mongoose, { Model, Schema, Types } from "mongoose";
+import mongoose, { Schema } from "mongoose";
 
-export type SyncStatus = "pending" | "processing" | "completed" | "failed";
-export type DirectoryImportStatus = "discovered" | "active" | "missing";
-
-export interface IAwinMerchant {
-  advertiserId: number;
-  programmeName?: string;
-  membershipStatus?: string;
-  programmeDetails?: unknown;
-  commissionRange?: unknown;
-  kpi?: unknown;
-  programmeInfo?: unknown;
-  detailsFetchedAt?: Date;
-  syncStatus: SyncStatus;
-  syncAttempts: number;
-  lastSyncError?: string;
-  basicProgrammeInfo?: unknown;
-  programmeStatus?: string;
-  primaryRegion?: string;
-  countryCode?: string;
-  currencyCode?: string;
-  sector?: string;
-  displayUrl?: string;
-  logoUrl?: string;
-  isHidden?: boolean;
-  programmeListFetchedAt?: Date;
-  lastSeenInProgrammeListAt?: Date;
-  directoryImportStatus: DirectoryImportStatus;
-  detailSyncRunId?: Types.ObjectId;
-  detailRunAttempts: number;
-  detailSyncQueuedAt?: Date;
-  detailSyncLockedAt?: Date;
-  lastSyncAttemptAt?: Date;
-  nextRetryAt?: Date;
-  detailSyncCompletedAt?: Date;
-  commissionMin?: number;
-  commissionMax?: number;
-  commissionType?: string;
-  createdAt: Date;
-  updatedAt: Date;
-}
-
-const AwinMerchantSchema = new Schema<IAwinMerchant>(
+const AwinMerchantSchema = new Schema(
   {
     advertiserId: {
       type: Number,
@@ -111,8 +70,8 @@ AwinMerchantSchema.index({ detailSyncRunId: 1, syncStatus: 1, nextRetryAt: 1 });
 AwinMerchantSchema.index({ programmeName: 1 });
 AwinMerchantSchema.index({ countryCode: 1, directoryImportStatus: 1 });
 
-const AwinMerchant: Model<IAwinMerchant> =
-  (mongoose.models.AwinMerchant as Model<IAwinMerchant> | undefined) ??
-  mongoose.model<IAwinMerchant>("AwinMerchant", AwinMerchantSchema);
+const AwinMerchant =
+  mongoose.models.AwinMerchant ??
+  mongoose.model("AwinMerchant", AwinMerchantSchema);
 
 export default AwinMerchant;

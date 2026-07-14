@@ -4,7 +4,7 @@ const AWIN_BASE_URL = "https://api.awin.com";
 const DEFAULT_PUBLISHER_ID = "1951827";
 const REQUEST_TIMEOUT_MS = 30_000;
 
-function parseRetryAfter(headerValue: string | null): number | undefined {
+function parseRetryAfter(headerValue) {
   if (!headerValue) {
     return undefined;
   }
@@ -25,10 +25,7 @@ function parseRetryAfter(headerValue: string | null): number | undefined {
   return delaySeconds > 0 ? delaySeconds : undefined;
 }
 
-function mapHttpStatusToError(
-  status: number,
-  retryAfterSeconds?: number,
-): AwinApiError {
+function mapHttpStatusToError(status, retryAfterSeconds) {
   switch (status) {
     case 401:
       return new AwinApiError(
@@ -72,11 +69,11 @@ function mapHttpStatusToError(
   }
 }
 
-function getPublisherId(): string {
+function getPublisherId() {
   return process.env.AWIN_PUBLISHER_ID ?? DEFAULT_PUBLISHER_ID;
 }
 
-function getApiToken(): string {
+function getApiToken() {
   const apiToken = process.env.AWIN_API_TOKEN;
 
   if (!apiToken) {
@@ -90,10 +87,7 @@ function getApiToken(): string {
   return apiToken;
 }
 
-async function awinGet(
-  path: string,
-  queryParams?: Record<string, string>,
-): Promise<unknown> {
+async function awinGet(path, queryParams) {
   const apiToken = getApiToken();
   const url = new URL(`${AWIN_BASE_URL}${path}`);
 
@@ -118,7 +112,7 @@ async function awinGet(
     });
 
     const responseText = await response.text();
-    let responseData: unknown;
+    let responseData;
 
     try {
       responseData = responseText ? JSON.parse(responseText) : null;
@@ -158,9 +152,7 @@ async function awinGet(
   }
 }
 
-export async function getAwinProgramDetails(
-  advertiserId: number,
-): Promise<unknown> {
+export async function getAwinProgramDetails(advertiserId) {
   if (!Number.isInteger(advertiserId) || advertiserId <= 0) {
     throw new AwinApiError(
       400,
@@ -177,10 +169,8 @@ export async function getAwinProgramDetails(
   });
 }
 
-export async function getAwinProgrammes(options?: {
-  includeHidden?: boolean;
-}): Promise<unknown> {
-  const includeHidden = options?.includeHidden ?? true;
+export async function getAwinProgrammes(options = {}) {
+  const includeHidden = options.includeHidden ?? true;
   const publisherId = getPublisherId();
   const responseData = await awinGet(`/publishers/${publisherId}/programmes`, {
     includeHidden: String(includeHidden),

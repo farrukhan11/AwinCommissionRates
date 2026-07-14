@@ -1,25 +1,5 @@
-import type { HydratedDocument } from "mongoose";
-
 import AwinMerchant from "@/models/AwinMerchant";
-import AwinDetailSyncRun, {
-  type DetailSyncMode,
-  type IAwinDetailSyncRun,
-} from "@/models/AwinDetailSyncRun";
-
-export interface StartDetailSyncInput {
-  mode?: DetailSyncMode;
-  staleAfterDays?: number;
-  maxAttempts?: number;
-  requestDelayMs?: number;
-  advertiserIds?: number[];
-}
-
-type MerchantQueueFilter = {
-  directoryImportStatus: "active";
-  advertiserId?: { $in: number[] };
-  syncStatus?: "failed";
-  $or?: Array<Record<string, unknown>>;
-};
+import AwinDetailSyncRun from "@/models/AwinDetailSyncRun";
 
 export class DetailSyncConflictError extends Error {
   constructor() {
@@ -28,42 +8,26 @@ export class DetailSyncConflictError extends Error {
   }
 }
 
-function clampInteger(value: unknown, fallback: number, min: number, max: number) {
+function clampInteger(value, fallback, min, max) {
   if (typeof value !== "number" || !Number.isInteger(value)) return fallback;
   return Math.min(max, Math.max(min, value));
 }
 
-function normalizeAdvertiserIds(value: unknown): number[] | undefined {
+function normalizeAdvertiserIds(value) {
   if (!Array.isArray(value)) return undefined;
   const ids = value.filter(
-    (item): item is number =>
-      typeof item === "number" && Number.isInteger(item) && item > 0,
+    (item) => typeof item === "number" && Number.isInteger(item) && item > 0,
   );
   return [...new Set(ids)].slice(0, 1000);
 }
 
-export function parseStartDetailSyncInput(raw: unknown): Required<
-  Pick<
-    StartDetailSyncInput,
-    "mode" | "staleAfterDays" | "maxAttempts" | "requestDelayMs"
-  >
-> & { advertiserIds?: number[] } {
+export function parseStartDetailSyncInput(raw) {
   const record =
-    typeof raw === "object" && raw !== null && !Array.isArray(raw)
-      ? (raw as Record<string, unknown>)
-      : {};
+    typeof raw === "object" && raw !== null && !Array.isArray(raw) ? raw : {};
 
-  const allowedModes: DetailSyncMode[] = [
-    "missing",
-    "stale",
-    "failed",
-    "all",
-    "selected",
-  ];
+  const allowedModes = ["missing", "stale", "failed", "all", "selected"];
   const requestedMode = record.mode;
-  const mode = allowedModes.includes(requestedMode as DetailSyncMode)
-    ? (requestedMode as DetailSyncMode)
-    : "missing";
+  const mode = allowedModes.includes(requestedMode) ? requestedMode : "missing";
   const advertiserIds = normalizeAdvertiserIds(record.advertiserIds);
 
   if (mode === "selected" && (!advertiserIds || advertiserIds.length === 0)) {
@@ -79,10 +43,8 @@ export function parseStartDetailSyncInput(raw: unknown): Required<
   };
 }
 
-function buildMerchantFilter(
-  input: ReturnType<typeof parseStartDetailSyncInput>,
-): MerchantQueueFilter {
-  const filter: MerchantQueueFilter = { directoryImportStatus: "active" };
+function buildMerchantFilter(input) {
+  const filter = { directoryImportStatus: "active" };
 
   if (input.mode === "selected") {
     filter.advertiserId = { $in: input.advertiserIds ?? [] };
@@ -106,19 +68,17 @@ function buildMerchantFilter(
   return filter;
 }
 
-function isDuplicateKeyError(error: unknown): boolean {
+function isDuplicateKeyError(error) {
   return (
     typeof error === "object" &&
     error !== null &&
     "code" in error &&
-    (error as { code?: unknown }).code === 11000
+    error.code === 11000
   );
 }
 
-export async function startDetailSyncRun(
-  input: ReturnType<typeof parseStartDetailSyncInput>,
-): Promise<HydratedDocument<IAwinDetailSyncRun>> {
-  let run: HydratedDocument<IAwinDetailSyncRun>;
+export async function startDetailSyncRun(input) {
+  let run;
 
   await AwinDetailSyncRun.init();
 
