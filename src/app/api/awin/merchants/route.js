@@ -73,7 +73,7 @@ export async function GET(request) {
         .skip((page - 1) * limit)
         .limit(limit)
         .select(
-          "advertiserId programmeName membershipStatus programmeStatus countryCode currencyCode sector displayUrl logoUrl directoryImportStatus syncStatus syncAttempts detailRunAttempts detailsFetchedAt commissionMin commissionMax commissionType kpi lastSyncError updatedAt",
+          "advertiserId programmeName membershipStatus programmeStatus countryCode currencyCode sector displayUrl logoUrl directoryImportStatus syncStatus syncAttempts detailRunAttempts detailsFetchedAt commissionMin commissionMax commissionType commissionDisplay commissionFetchStatus commissionUnavailableReason kpi lastSyncError updatedAt",
         )
         .lean(),
     ]);
