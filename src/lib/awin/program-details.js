@@ -3,13 +3,54 @@ function isRecord(value) {
 }
 
 function readString(value) {
-  return typeof value === "string" && value.trim() !== "" ? value : undefined;
+  return typeof value === "string" && value.trim() !== "" ? value.trim() : undefined;
 }
 
 function readFiniteNumber(value) {
-  return typeof value === "number" && Number.isFinite(value)
-    ? value
-    : undefined;
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim() !== "") {
+    const parsed = Number(value.trim());
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+  return undefined;
+}
+
+function formatNumber(value) {
+  return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(4)));
+}
+
+function formatSingleCommissionRange(range, currencyCode) {
+  if (!isRecord(range)) return undefined;
+
+  const min = readFiniteNumber(range.min);
+  const max = readFiniteNumber(range.max);
+  if (min === undefined || max === undefined) return undefined;
+
+  const type = readString(range.type)?.toLowerCase();
+  const minText = formatNumber(min);
+  const maxText = formatNumber(max);
+
+  if (type === "percentage") {
+    return min === max ? `${minText}%` : `${minText}% - ${maxText}%`;
+  }
+
+  const currency = currencyCode || "";
+  if (min === max) return currency ? `${currency} ${minText}` : minText;
+  return currency
+    ? `${currency} ${minText} - ${currency} ${maxText}`
+    : `${minText} - ${maxText}`;
+}
+
+export function formatCommissionRange(commissionRange, currencyCode) {
+  if (!Array.isArray(commissionRange) || commissionRange.length === 0) {
+    return undefined;
+  }
+
+  const formatted = commissionRange
+    .map((range) => formatSingleCommissionRange(range, currencyCode))
+    .filter(Boolean);
+
+  return formatted.length > 0 ? [...new Set(formatted)].join(" / ") : undefined;
 }
 
 export function normalizeAwinProgramDetails(raw) {
@@ -38,23 +79,43 @@ export function normalizeAwinProgramDetails(raw) {
     }
   }
 
-  if (Array.isArray(raw.commissionRange) && raw.commissionRange.length > 0) {
-    const ranges = raw.commissionRange.filter(isRecord);
-    const mins = ranges
-      .map((range) => readFiniteNumber(range.min))
-      .filter((value) => value !== undefined);
-    const maxes = ranges
-      .map((range) => readFiniteNumber(range.max))
-      .filter((value) => value !== undefined);
-    const types = ranges
-      .map((range) => readString(range.type))
-      .filter((value) => value !== undefined);
+  const ranges = Array.isArray(raw.commissionRange)
+    ? raw.commissionRange.filter(isRecord)
+    : [];
+  const mins = ranges
+    .map((range) => readFiniteNumber(range.min))
+    .filter((value) => value !== undefined);
+  const maxes = ranges
+    .map((range) => readFiniteNumber(range.max))
+    .filter((value) => value !== undefined);
+  const types = ranges
+    .map((range) => readString(range.type)?.toLowerCase())
+    .filter((value) => value !== undefined);
 
-    if (mins.length > 0) normalized.commissionMin = Math.min(...mins);
-    if (maxes.length > 0) normalized.commissionMax = Math.max(...maxes);
-    if (types.length > 0) {
-      normalized.commissionType = [...new Set(types)].join(",");
-    }
+  if (mins.length > 0) normalized.commissionMin = Math.min(...mins);
+  if (maxes.length > 0) normalized.commissionMax = Math.max(...maxes);
+  if (types.length > 0) normalized.commissionType = [...new Set(types)].join(",");
+
+  const commissionDisplay = formatCommissionRange(
+    raw.commissionRange,
+    normalized.currencyCode,
+  );
+  const membershipKey = normalized.membershipStatus
+    ?.toLowerCase()
+    .replace(/[\s_-]+/g, "");
+
+  if (commissionDisplay) {
+    normalized.commissionDisplay = commissionDisplay;
+    normalized.commissionFetchStatus = "fetched";
+    normalized.commissionUnavailableReason = "";
+  } else {
+    normalized.commissionDisplay =
+      membershipKey === "notjoined" ? "Not available (not joined)" : "Not provided";
+    normalized.commissionFetchStatus = "unavailable";
+    normalized.commissionUnavailableReason =
+      membershipKey === "notjoined"
+        ? "Awin does not expose commissionRange for a programme this publisher has not joined"
+        : "Awin did not provide commissionRange for this programme";
   }
 
   return normalized;
