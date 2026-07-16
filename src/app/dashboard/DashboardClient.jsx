@@ -204,7 +204,7 @@ export default function DashboardClient() {
   }
 
   return (
-    <main className="mx-auto min-h-screen max-w-7xl px-5 py-8">
+    <main className="mx-auto min-h-screen max-w-[90rem] px-5 py-8">
       <header className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <p className="text-sm font-medium text-emerald-500">Awin Commission Rates</p>
@@ -225,34 +225,7 @@ export default function DashboardClient() {
           >
             Import directory
           </button>
-          <button
-            disabled={busy}
-            className="btn-primary"
-            onClick={() =>
-              void runAction("Missing detail sync", () =>
-                api("/api/awin/detail-sync/start", {
-                  method: "POST",
-                  body: JSON.stringify({ mode: "missing" }),
-                }),
-              )
-            }
-          >
-            Sync missing details
-          </button>
-          <button
-            disabled={busy}
-            className="btn-secondary"
-            onClick={() =>
-              void runAction("Stale detail sync", () =>
-                api("/api/awin/detail-sync/start", {
-                  method: "POST",
-                  body: JSON.stringify({ mode: "stale", staleAfterDays: 30 }),
-                }),
-              )
-            }
-          >
-            Refresh stale
-          </button>
+
           <button disabled={busy} className="btn-secondary" onClick={() => void exportCsv()}>
             Export CSV
           </button>
@@ -272,84 +245,7 @@ export default function DashboardClient() {
         <Stat label="Detail failures" value={directory?.merchants.failedDetails ?? 0} />
       </section>
 
-      <section className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-950 p-6">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div>
-            <p className="text-sm text-zinc-500">Current detail run</p>
-            <h2 className="mt-1 text-xl font-semibold text-white">
-              {run ? `${run.mode} · ${run.status}` : "No run created"}
-            </h2>
-          </div>
-          {run && ["pending", "running", "paused"].includes(run.status) && (
-            <div className="flex gap-2">
-              {run.status === "paused" ? (
-                <button
-                  disabled={busy}
-                  className="btn-primary"
-                  onClick={() =>
-                    void runAction("Resume", () =>
-                      api("/api/awin/detail-sync/control", {
-                        method: "POST",
-                        body: JSON.stringify({ action: "resume", runId: run.id }),
-                      }),
-                    )
-                  }
-                >
-                  Resume
-                </button>
-              ) : (
-                <button
-                  disabled={busy}
-                  className="btn-secondary"
-                  onClick={() =>
-                    void runAction("Pause", () =>
-                      api("/api/awin/detail-sync/control", {
-                        method: "POST",
-                        body: JSON.stringify({ action: "pause", runId: run.id }),
-                      }),
-                    )
-                  }
-                >
-                  Pause
-                </button>
-              )}
-              <button
-                disabled={busy}
-                className="btn-danger"
-                onClick={() =>
-                  void runAction("Cancel", () =>
-                    api("/api/awin/detail-sync/control", {
-                      method: "POST",
-                      body: JSON.stringify({ action: "cancel", runId: run.id }),
-                    }),
-                  )
-                }
-              >
-                Cancel
-              </button>
-            </div>
-          )}
-        </div>
 
-        {run && (
-          <>
-            <div className="mt-5 h-3 overflow-hidden rounded-full bg-zinc-800">
-              <div
-                className="h-full rounded-full bg-emerald-500 transition-all"
-                style={{ width: `${Math.min(100, run.progressPercentage)}%` }}
-              />
-            </div>
-            <div className="mt-3 grid gap-3 text-sm text-zinc-400 sm:grid-cols-3 lg:grid-cols-6">
-              <span>{run.processedCount}/{run.totalQueued} processed</span>
-              <span>{run.successCount} successful</span>
-              <span>{run.failedCount} failed</span>
-              <span>{run.retryCount} retries</span>
-              <span>{run.rateLimitCount} rate limits</span>
-              <span>ETA {duration(run.estimatedSeconds)}</span>
-            </div>
-          </>
-        )}
-      </section>
 
       <section className="mt-6 overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-950">
         <div className="flex flex-wrap gap-3 border-b border-zinc-800 p-4">
